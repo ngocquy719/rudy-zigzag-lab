@@ -55,14 +55,14 @@
   <div class="ctl">
     <label>Thuật toán:</label>
     <select id="algo" onchange="switchAlgo()">
-      <option value="fractal">Fractal (sóng trong sóng)</option>
+      <option value="fractal">Cấu trúc SMC (khuyên dùng)</option>
       <option value="pct">% độ sâu hồi</option>
     </select>
   </div>
   <div class="ctl" id="fracCtl">
-    <label>Pivot nội bộ:</label>
-    <input id="innerLen" type="number" value="3" min="2" max="30" style="width:55px" oninput="recalc()">
-    <label style="margin-left:10px"><input id="extFilter" type="checkbox" checked onchange="recalc()"> Chỉ swing NGOÀI (external)</label>
+    <label>Độ chi tiết:</label>
+    <input id="detail" type="range" min="0" max="100" value="60" oninput="recalc()" title="Trái = sóng lớn (ít swing) · Phải = chi tiết (nhiều swing)">
+    <span id="detailV">60</span>
   </div>
   <div class="ctl" id="pctCtl" style="display:none">
     <label>Độ sâu hồi:</label>
@@ -252,6 +252,23 @@ function computePivots(cs, len){
   return sw;
 }
 
+// ---------------- Lọc sóng nhỏ theo biên độ (độ nổi bật) — giữ nguyên cấu trúc, chỉ bớt chi tiết ----------------
+function simplify(sw, minMove){
+  let arr=sw.map(s=>({...s}));
+  while(arr.length>3){
+    let mi=-1,mp=Infinity;
+    for(let i=1;i<arr.length-1;i++){ const p=Math.min(Math.abs(arr[i].price-arr[i-1].price),Math.abs(arr[i+1].price-arr[i].price)); if(p<mp){mp=p;mi=i;} }
+    if(mp>=minMove||mi<0) break;
+    arr.splice(mi,1);
+    if(arr[mi-1]&&arr[mi]&&arr[mi-1].type===arr[mi].type){            // hợp nhất 2 cùng loại, giữ cực trị
+      const hi=arr[mi-1].type==='H';
+      if(hi){ if(arr[mi].price>arr[mi-1].price) arr.splice(mi-1,1); else arr.splice(mi,1); }
+      else  { if(arr[mi].price<arr[mi-1].price) arr.splice(mi-1,1); else arr.splice(mi,1); }
+    }
+  }
+  return arr;
+}
+
 function switchAlgo(){
   const algo=document.getElementById('algo').value;
   document.getElementById('fracCtl').style.display = algo==='fractal'?'flex':'none';
@@ -263,12 +280,12 @@ function recalc(){
   if(!candles.length) return;
   const algo=document.getElementById('algo').value;
   if(algo==='fractal'){
-    const len=parseInt(document.getElementById('innerLen').value)||3;
-    const tf=document.getElementById('tf').value;
-    // M1 = khung nhỏ nhất: dùng pivot thuần (không skip sóng con). Khung lớn hơn: fractal sóng-trong-sóng.
-    const isM1 = /^1m$/i.test(tf);
-    algoSwings = isM1 ? computePivots(candles,len) : computeFractal(candles,len);
-    if(document.getElementById('extFilter').checked) algoSwings=externalize(algoSwings);
+    const sens=parseInt(document.getElementById('detail').value);
+    document.getElementById('detailV').textContent=sens;
+    let lo=Infinity,hi=-Infinity; for(const c of candles){ if(c.low<lo)lo=c.low; if(c.high>hi)hi=c.high; }
+    const f=Math.pow((100-sens)/100,1.5)*0.15;          // sens cao = f nhỏ = nhiều chi tiết
+    const piv=computePivots(candles,3);                 // pivot mịn nhất (cố định)
+    algoSwings=externalize(simplify(piv, f*(hi-lo)));    // lọc sóng nhỏ -> giữ cấu trúc
   }else{
     const mr=parseFloat(document.getElementById('minRetr').value);
     document.getElementById('minRetrV').textContent=mr.toFixed(2);
@@ -316,7 +333,7 @@ function buildExport(){
     symbol:document.getElementById('sym').value,
     tf:document.getElementById('tf').value,
     algo:document.getElementById('algo').value,
-    innerLen:parseInt(document.getElementById('innerLen').value),
+    detail:parseInt(document.getElementById('detail').value),
     minRetr:parseFloat(document.getElementById('minRetr').value),
     nCandles:candles.length,
     timeRange: candles.length?[candles[0].time,candles[candles.length-1].time]:null,
