@@ -8,16 +8,23 @@
 <style>
   :root { --bg:#0e1117; --panel:#161b22; --line:#30363d; --txt:#e6edf3; --mut:#8b949e; --accent:#2157f3; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,Segoe UI,Arial; background:var(--bg); color:var(--txt); }
-  header { padding:10px 14px; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  header h1 { font-size:15px; margin:0 12px 0 0; }
-  .ctl { display:flex; gap:6px; align-items:center; font-size:13px; }
-  select, input, button { background:var(--panel); color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font-size:13px; }
+  body { margin:0; font-family:system-ui,Segoe UI,Arial; background:var(--bg); color:var(--txt);
+         display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
+  header { padding:8px 12px; border-bottom:1px solid var(--line); display:flex; gap:8px; align-items:center; flex-wrap:wrap; flex:0 0 auto; }
+  header h1 { font-size:15px; margin:0 8px 0 0; }
+  .ctl { display:flex; gap:6px; align-items:center; font-size:13px; flex-wrap:wrap; }
+  select, input, button { background:var(--panel); color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:6px 9px; font-size:13px; }
   button { cursor:pointer; }
   button.primary { background:var(--accent); border-color:var(--accent); }
   button.warn { background:#9e1b1b; border-color:#9e1b1b; }
-  #chart { width:100vw; height:calc(100vh - 150px); }
-  .hint { font-size:12px; color:var(--mut); padding:6px 14px; border-top:1px solid var(--line); }
+  #chart { width:100%; flex:1 1 auto; min-height:220px; touch-action:none; }
+  .hint { font-size:12px; color:var(--mut); padding:6px 12px; border-top:1px solid var(--line); flex:0 0 auto; max-height:34vh; overflow:auto; }
+  /* Mobile: nút to hơn cho dễ chạm, chữ không tràn */
+  @media (max-width:720px){
+    header h1 { width:100%; margin:0 0 2px; font-size:14px; }
+    select, input, button { padding:8px 10px; font-size:14px; }
+    .hint .legend { display:flex; margin:2px 0; }
+  }
   .legend { display:inline-flex; gap:4px; align-items:center; margin-right:12px; }
   .sw { width:14px; height:3px; display:inline-block; }
   textarea { width:100%; height:70px; background:#0b0e14; color:#9ece6a; border:1px solid var(--line); font-family:monospace; font-size:11px; }
@@ -100,17 +107,23 @@ let editMode = false;
 function initChart(){
   const el = document.getElementById('chart');
   chart = LightweightCharts.createChart(el, {
+    autoSize:true,
     layout:{ background:{color:'#0e1117'}, textColor:'#e6edf3' },
     grid:{ vertLines:{color:'#1c222b'}, horzLines:{color:'#1c222b'} },
-    timeScale:{ timeVisible:true, secondsVisible:false, borderColor:'#30363d' },
+    timeScale:{ timeVisible:true, secondsVisible:false, borderColor:'#30363d', rightOffset:4, minBarSpacing:0.2 },
     rightPriceScale:{ borderColor:'#30363d' },
     crosshair:{ mode: LightweightCharts.CrosshairMode.Normal },
+    // bật kéo + zoom cho cả chuột lẫn CẢM ỨNG (pinch) trên điện thoại
+    handleScroll:{ mouseWheel:true, pressedMouseMove:true, horzTouchDrag:true, vertTouchDrag:false },
+    handleScale:{ mouseWheel:true, pinch:true, axisPressedMouseMove:true, axisDoubleClickReset:true },
+    kineticScroll:{ touch:true, mouse:false },
   });
   candleSeries = chart.addCandlestickSeries({ upColor:'#089981', downColor:'#f23645', borderVisible:false, wickUpColor:'#089981', wickDownColor:'#f23645' });
   algoSeries = chart.addLineSeries({ color:'#2157f3', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
   userSeries = chart.addLineSeries({ color:'#f7b500', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
   chart.subscribeClick(onChartClick);
-  window.addEventListener('resize', ()=> chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }));
+  // autoSize:true đã tự co giãn theo khung; gọi fit khi xoay ngang/dọc điện thoại
+  window.addEventListener('orientationchange', ()=> setTimeout(()=>chart.timeScale().fitContent(),300));
 }
 
 // ---------------- Thuật toán zigzag (% độ sâu hồi) — bản PINE của em port sang JS ----------------
@@ -218,6 +231,27 @@ function externalize(sw){
   return out;
 }
 
+// ---------------- PIVOT thuần (cho M1): tìm đỉnh/đáy luân phiên, KHÔNG skip sóng con ----------------
+// M1 là khung nhỏ nhất, không còn khung dưới để lọc noise -> chỉ cần cấu trúc. externalize() lo phần HH/HL.
+function computePivots(cs, len){
+  const sw=[]; if(cs.length<len+2) return sw;
+  let lg=0, lgPrev=0, rH=null,rHi=0, rL=null,rLi=0;
+  for(let i=0;i<cs.length;i++){
+    const c=cs[i];
+    if(i>=len){
+      let hh=-Infinity, ll=Infinity;
+      for(let j=i-len+1;j<=i;j++){ if(cs[j].high>hh)hh=cs[j].high; if(cs[j].low<ll)ll=cs[j].low; }
+      if(cs[i-len].high>hh) lg=0; else if(cs[i-len].low<ll) lg=1;
+    }
+    const pvH=(lg-lgPrev)===-1, pvL=(lg-lgPrev)===1; lgPrev=lg;
+    if(rH===null||c.high>rH){rH=c.high;rHi=i;}
+    if(rL===null||c.low<rL){rL=c.low;rLi=i;}
+    if(pvH){ sw.push({idx:rHi,time:cs[rHi].time,price:rH,type:'H'}); rH=c.high;rHi=i; rL=c.low;rLi=i; }
+    if(pvL){ sw.push({idx:rLi,time:cs[rLi].time,price:rL,type:'L'}); rH=c.high;rHi=i; rL=c.low;rLi=i; }
+  }
+  return sw;
+}
+
 function switchAlgo(){
   const algo=document.getElementById('algo').value;
   document.getElementById('fracCtl').style.display = algo==='fractal'?'flex':'none';
@@ -230,7 +264,10 @@ function recalc(){
   const algo=document.getElementById('algo').value;
   if(algo==='fractal'){
     const len=parseInt(document.getElementById('innerLen').value)||3;
-    algoSwings=computeFractal(candles,len);
+    const tf=document.getElementById('tf').value;
+    // M1 = khung nhỏ nhất: dùng pivot thuần (không skip sóng con). Khung lớn hơn: fractal sóng-trong-sóng.
+    const isM1 = /^1m$/i.test(tf);
+    algoSwings = isM1 ? computePivots(candles,len) : computeFractal(candles,len);
     if(document.getElementById('extFilter').checked) algoSwings=externalize(algoSwings);
   }else{
     const mr=parseFloat(document.getElementById('minRetr').value);
