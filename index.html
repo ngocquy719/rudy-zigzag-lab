@@ -209,7 +209,7 @@ function externalize(sw){
           peakI=i;
         }
       }else{                                              // downtrend, bounce lên
-        if(protHi!=null && v>protHi){ pushI(trghI); protLo=null; dir=1; peakI=i; trghI=-1; }  // phá đỉnh bảo vệ -> đảo tăng
+        if(protHi!=null && v>protHi){ pushI(trghI); protLo=(trghI>=0?sw[trghI].price:null); dir=1; peakI=i; trghI=-1; }  // phá đỉnh bảo vệ -> đảo tăng
         else if(peakI<0 || v>sw[peakI].price){ peakI=i; }
       }
     }else{ // L
@@ -219,7 +219,7 @@ function externalize(sw){
           trghI=i;
         }
       }else{                                              // uptrend, pullback
-        if(protLo!=null && v<protLo){ pushI(peakI); protHi=null; dir=-1; trghI=i; peakI=-1; }  // phá đáy bảo vệ -> đảo giảm
+        if(protLo!=null && v<protLo){ pushI(peakI); protHi=(peakI>=0?sw[peakI].price:null); dir=-1; trghI=i; peakI=-1; }  // phá đáy bảo vệ -> đảo giảm
         else if(trghI<0 || v<sw[trghI].price){ trghI=i; }
       }
     }
