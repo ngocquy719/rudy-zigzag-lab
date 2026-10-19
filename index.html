@@ -64,7 +64,9 @@
   <div class="ctl">
     <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Chế độ vẽ của ANH: TẮT</button>
     <button class="warn" onclick="clearUser()">Xoá nét anh vẽ</button>
-    <button class="primary" onclick="doExport()">📤 Export (gửi cho em)</button>
+    <button class="primary" onclick="sendToClaude()">📨 Gửi cho em</button>
+    <button onclick="doExport()">📤 Export (copy tay)</button>
+    <span id="sendStatus" style="font-weight:600"></span>
   </div>
 </header>
 
@@ -229,8 +231,9 @@ function renderUser(){
 function clearUser(){ userPoints=[]; renderUser(); }
 
 // ---------------- Export ----------------
-function doExport(){
-  const out={
+const RELAY='https://ntfy.sh/rudy-zigzag-lab-7h3k9x2';  // kênh trung gian Claude đọc
+function buildExport(){
+  return {
     symbol:document.getElementById('sym').value,
     tf:document.getElementById('tf').value,
     algo:document.getElementById('algo').value,
@@ -241,9 +244,19 @@ function doExport(){
     algoSwings: algoSwings.map(s=>({t:s.time,p:+s.price.toFixed(5),type:s.type})),
     userSwings: userPoints.map(p=>({t:p.time,p:+p.price.toFixed(5),type:p.type})),
   };
+}
+function doExport(){
   const box=document.getElementById('exportOut');
   box.style.display='block';
-  document.getElementById('exportText').value=JSON.stringify(out);
+  document.getElementById('exportText').value=JSON.stringify(buildExport());
+}
+function sendToClaude(){
+  if(!candles.length){ document.getElementById('sendStatus').textContent='⚠ chưa có data'; return; }
+  const st=document.getElementById('sendStatus');
+  st.style.color='#f7b500'; st.textContent='⏳ đang gửi...';
+  fetch(RELAY,{method:'POST',body:JSON.stringify(buildExport())})
+    .then(r=>{ if(!r.ok) throw 0; st.style.color='#089981'; st.textContent='✓ Đã gửi! Nhắn Claude: "nhận chưa"'; })
+    .catch(()=>{ st.style.color='#f23645'; st.textContent='✗ gửi lỗi — bấm "Export (copy tay)" dán vào chat'; });
 }
 function copyExport(){
   const t=document.getElementById('exportText'); t.select(); document.execCommand('copy');
