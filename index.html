@@ -55,6 +55,7 @@
   <div class="ctl" id="fracCtl">
     <label>Pivot nội bộ:</label>
     <input id="innerLen" type="number" value="3" min="2" max="30" style="width:55px" oninput="recalc()">
+    <label style="margin-left:10px"><input id="extFilter" type="checkbox" checked onchange="recalc()"> Chỉ swing NGOÀI (external)</label>
   </div>
   <div class="ctl" id="pctCtl" style="display:none">
     <label>Độ sâu hồi:</label>
@@ -177,6 +178,36 @@ function computeFractal(cs, len){
   return sw;
 }
 
+// ---------------- Tầng EXTERNAL: lọc swing nội bộ -> swing ngoài (phá cấu trúc) ----------------
+// Quy tắc: trong uptrend, chỉ chốt đỉnh ngoài khi có LOWER-LOW (phá đáy nội bộ trước đó) = CHoCH.
+// Ngược lại cho downtrend. => bỏ hết nhịp hồi lắt nhắt, chỉ giữ bước ngoặt lớn.
+function externalize(sw){
+  if(sw.length<4) return sw.slice();
+  const out=[]; const push=(idx,tent)=>{ if(out.length && out[out.length-1]._i===idx) return;
+    const o={...sw[idx]}; o._i=idx; if(tent)o.tentative=true; else delete o.tentative; out.push(o); };
+  let trend=0,runHiI=-1,runLoI=-1,lastH=null,lastL=null;
+  push(0,false);
+  if(sw[0].type==='H'){runHiI=0;lastH=sw[0].price;} else {runLoI=0;lastL=sw[0].price;}
+  for(let i=1;i<sw.length;i++){
+    const s=sw[i],v=s.price;
+    if(s.type==='H'){
+      if(trend<=0 && lastH!==null && v>lastH){ if(runLoI>=0)push(runLoI,false); trend=1; runHiI=i; }
+      else if(trend===0){ runHiI=i; }
+      if(trend>0 && (runHiI<0 || v>sw[runHiI].price)) runHiI=i;
+      lastH=v;
+    }else{
+      if(trend>=0 && lastL!==null && v<lastL){ if(runHiI>=0)push(runHiI,false); trend=-1; runLoI=i; }
+      else if(trend===0){ runLoI=i; }
+      if(trend<0 && (runLoI<0 || v<sw[runLoI].price)) runLoI=i;
+      lastL=v;
+    }
+  }
+  if(trend>0 && runHiI>=0) push(runHiI,true);
+  else if(trend<0 && runLoI>=0) push(runLoI,true);
+  out.forEach(o=>delete o._i);
+  return out;
+}
+
 function switchAlgo(){
   const algo=document.getElementById('algo').value;
   document.getElementById('fracCtl').style.display = algo==='fractal'?'flex':'none';
@@ -190,6 +221,7 @@ function recalc(){
   if(algo==='fractal'){
     const len=parseInt(document.getElementById('innerLen').value)||3;
     algoSwings=computeFractal(candles,len);
+    if(document.getElementById('extFilter').checked) algoSwings=externalize(algoSwings);
   }else{
     const mr=parseFloat(document.getElementById('minRetr').value);
     document.getElementById('minRetrV').textContent=mr.toFixed(2);
