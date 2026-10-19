@@ -46,6 +46,17 @@
     <button class="primary" onclick="loadData()">Tải</button>
   </div>
   <div class="ctl">
+    <label>Thuật toán:</label>
+    <select id="algo" onchange="switchAlgo()">
+      <option value="fractal">Fractal (sóng trong sóng)</option>
+      <option value="pct">% độ sâu hồi</option>
+    </select>
+  </div>
+  <div class="ctl" id="fracCtl">
+    <label>Pivot nội bộ:</label>
+    <input id="innerLen" type="number" value="3" min="2" max="30" style="width:55px" oninput="recalc()">
+  </div>
+  <div class="ctl" id="pctCtl" style="display:none">
     <label>Độ sâu hồi:</label>
     <input id="minRetr" type="range" min="0.05" max="0.8" step="0.05" value="0.4" oninput="recalc()">
     <span id="minRetrV">0.40</span>
@@ -125,11 +136,63 @@ function computeZigzag(cs, minRetr){
   return sw;
 }
 
+// ---------------- Thuật toán FRACTAL (sóng trong sóng) — port từ Pine f_struct ----------------
+// Tầng NỘI BỘ: leg nhỏ (len) -> inner BOS/CHoCH -> inner trend (itr).
+// Swing NGOÀI = cực trị running của mỗi đoạn inner-trend, CHỐT khi inner đổi chiều.
+function computeFractal(cs, len){
+  const sw=[]; if(cs.length < len+2) return sw;
+  let lg=0, lgPrev=0;
+  let rH=null,rL=null;                 // running extreme nội bộ
+  let ih=null,il=null,ihx=false,ilx=false,itr=0;
+  let oe=null,oet=null,oeIdx=0;        // outer extreme
+  for(let i=0;i<cs.length;i++){
+    const c=cs[i];
+    // leg kiểu LuxAlgo: bar (i-len) có cao/thấp hơn toàn bộ cửa sổ len gần nhất không
+    if(i>=len){
+      let hh=-Infinity, ll=Infinity;
+      for(let j=i-len+1;j<=i;j++){ if(cs[j].high>hh)hh=cs[j].high; if(cs[j].low<ll)ll=cs[j].low; }
+      if(cs[i-len].high>hh) lg=0;
+      else if(cs[i-len].low<ll) lg=1;
+    }
+    const pvH=(lg-lgPrev)===-1, pvL=(lg-lgPrev)===1;  // pivot nội bộ
+    lgPrev=lg;
+    if(rH===null||c.high>rH) rH=c.high;
+    if(rL===null||c.low<rL)  rL=c.low;
+    if(pvH){ ih=rH; ihx=false; rH=c.high; rL=c.low; }
+    if(pvL){ il=rL; ilx=false; rH=c.high; rL=c.low; }
+    if(itr===1 && (oe===null||c.high>oe)){ oe=c.high;oet=c.time;oeIdx=i; }
+    if(itr===-1&& (oe===null||c.low<oe)){  oe=c.low; oet=c.time;oeIdx=i; }
+    if(ih!==null && !ihx && c.close>ih){   // inner phá đỉnh nội bộ -> chốt đáy ngoài
+      if(itr===-1){ sw.push({idx:oeIdx,time:oet,price:oe,type:'L'}); oe=c.high;oet=c.time;oeIdx=i; }
+      ihx=true; itr=1;
+    }
+    if(il!==null && !ilx && c.close<il){   // inner phá đáy nội bộ -> chốt đỉnh ngoài
+      if(itr===1){ sw.push({idx:oeIdx,time:oet,price:oe,type:'H'}); oe=c.low;oet=c.time;oeIdx=i; }
+      ilx=true; itr=-1;
+    }
+  }
+  if(oe!==null) sw.push({idx:oeIdx,time:oet,price:oe,type:itr===1?'H':'L',tentative:true});
+  return sw;
+}
+
+function switchAlgo(){
+  const algo=document.getElementById('algo').value;
+  document.getElementById('fracCtl').style.display = algo==='fractal'?'flex':'none';
+  document.getElementById('pctCtl').style.display  = algo==='pct'?'flex':'none';
+  recalc();
+}
+
 function recalc(){
-  const mr=parseFloat(document.getElementById('minRetr').value);
-  document.getElementById('minRetrV').textContent=mr.toFixed(2);
   if(!candles.length) return;
-  algoSwings=computeZigzag(candles,mr);
+  const algo=document.getElementById('algo').value;
+  if(algo==='fractal'){
+    const len=parseInt(document.getElementById('innerLen').value)||3;
+    algoSwings=computeFractal(candles,len);
+  }else{
+    const mr=parseFloat(document.getElementById('minRetr').value);
+    document.getElementById('minRetrV').textContent=mr.toFixed(2);
+    algoSwings=computeZigzag(candles,mr);
+  }
   algoSeries.setData(algoSwings.map(s=>({time:s.time,value:s.price})));
 }
 
@@ -170,6 +233,8 @@ function doExport(){
   const out={
     symbol:document.getElementById('sym').value,
     tf:document.getElementById('tf').value,
+    algo:document.getElementById('algo').value,
+    innerLen:parseInt(document.getElementById('innerLen').value),
     minRetr:parseFloat(document.getElementById('minRetr').value),
     nCandles:candles.length,
     timeRange: candles.length?[candles[0].time,candles[candles.length-1].time]:null,
