@@ -236,6 +236,10 @@ function externalize(sw){
 function computePivots(cs, len){
   const sw=[]; if(cs.length<len+2) return sw;
   let lg=0, lgPrev=0, rH=null,rHi=0, rL=null,rLi=0;
+  // khi chốt 1 pivot, reset cực trị đối diện bằng cách QUÉT CẢ cửa sổ [i-len..i]
+  // (nếu reset về nến hiện tại sẽ bỏ sót cực trị rơi trong vùng trễ xác nhận pivot)
+  const winMinL=i=>{let m=Infinity,mi=i;for(let j=Math.max(0,i-len);j<=i;j++)if(cs[j].low<m){m=cs[j].low;mi=j;}return[m,mi];};
+  const winMaxH=i=>{let m=-Infinity,mi=i;for(let j=Math.max(0,i-len);j<=i;j++)if(cs[j].high>m){m=cs[j].high;mi=j;}return[m,mi];};
   for(let i=0;i<cs.length;i++){
     const c=cs[i];
     if(i>=len){
@@ -246,8 +250,8 @@ function computePivots(cs, len){
     const pvH=(lg-lgPrev)===-1, pvL=(lg-lgPrev)===1; lgPrev=lg;
     if(rH===null||c.high>rH){rH=c.high;rHi=i;}
     if(rL===null||c.low<rL){rL=c.low;rLi=i;}
-    if(pvH){ sw.push({idx:rHi,time:cs[rHi].time,price:rH,type:'H'}); rH=c.high;rHi=i; rL=c.low;rLi=i; }
-    if(pvL){ sw.push({idx:rLi,time:cs[rLi].time,price:rL,type:'L'}); rH=c.high;rHi=i; rL=c.low;rLi=i; }
+    if(pvH){ sw.push({idx:rHi,time:cs[rHi].time,price:rH,type:'H'}); [rL,rLi]=winMinL(i); rH=c.high;rHi=i; }
+    if(pvL){ sw.push({idx:rLi,time:cs[rLi].time,price:rL,type:'L'}); [rH,rHi]=winMaxH(i); rL=c.low;rLi=i; }
   }
   return sw;
 }
