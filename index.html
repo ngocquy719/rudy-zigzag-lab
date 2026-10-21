@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#11 (BOS/CHoCH kẻ nét tại nến break-close)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#12 (bắt cả BOS/CHoCH ở leg đang chạy)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -298,7 +298,9 @@ function findBreak(fromIdx,toIdx,level,dir){ // cây nến ĐẦU TIÊN đóng v
 }
 function labelStructure(sw){
   const ev=[]; let pHs=null,pLs=null,bias=0;   // pHs/pLs = swing H/L trước đó (giữ cả idx để kẻ nét)
-  for(const s of sw){ if(s.tentative) continue;
+  // XÉT CẢ swing tentative (leg đang hình thành): cú đóng-nến phá mức cũ là SỰ THẬT lịch sử,
+  // không được bỏ qua -> nếu bỏ sẽ mất BOS/CHoCH của cú phá cuối cùng (vd phá đáy khi đang rơi).
+  for(const s of sw){
     if(s.type==='H'){ if(pHs && s.price>pHs.price){ const bo=findBreak(pHs.idx,s.idx,pHs.price,1);
         if(bo>=0){ ev.push({pivotIdx:pHs.idx,breakIdx:bo,level:pHs.price,dir:1,type:bias>=0?'BOS':'CHoCH'}); bias=1; } } pHs=s; }
     else { if(pLs && s.price<pLs.price){ const bo=findBreak(pLs.idx,s.idx,pLs.price,-1);
