@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#8 (giữ cả đỉnh+đáy khi trùng nến)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#9 (đỉnh/đáy tạm đúng nguyên tắc lock)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -234,34 +234,32 @@ function externalize(sw){
   return out;
 }
 
-// ---------------- PIVOT thuần (cho M1): tìm đỉnh/đáy luân phiên, KHÔNG skip sóng con ----------------
-// M1 là khung nhỏ nhất, không còn khung dưới để lọc noise -> chỉ cần cấu trúc. externalize() lo phần HH/HL.
-function computePivots(cs, len){
-  const sw=[]; if(cs.length<len+2) return sw;
-  let lg=0, lgPrev=0, rH=null,rHi=0, rL=null,rLi=0;
-  // khi chốt 1 pivot, reset cực trị đối diện bằng cách QUÉT CẢ cửa sổ [i-len..i]
-  // (nếu reset về nến hiện tại sẽ bỏ sót cực trị rơi trong vùng trễ xác nhận pivot)
-  const winMinL=i=>{let m=Infinity,mi=i;for(let j=Math.max(0,i-len);j<=i;j++)if(cs[j].low<m){m=cs[j].low;mi=j;}return[m,mi];};
-  const winMaxH=i=>{let m=-Infinity,mi=i;for(let j=Math.max(0,i-len);j<=i;j++)if(cs[j].high>m){m=cs[j].high;mi=j;}return[m,mi];};
-  for(let i=0;i<cs.length;i++){
-    const c=cs[i];
-    if(i>=len){
-      let hh=-Infinity, ll=Infinity;
-      for(let j=i-len+1;j<=i;j++){ if(cs[j].high>hh)hh=cs[j].high; if(cs[j].low<ll)ll=cs[j].low; }
-      if(cs[i-len].high>hh) lg=0; else if(cs[i-len].low<ll) lg=1;
-    }
-    const pvH=(lg-lgPrev)===-1, pvL=(lg-lgPrev)===1; lgPrev=lg;
-    if(rH===null||c.high>rH){rH=c.high;rHi=i;}
-    if(rL===null||c.low<rL){rL=c.low;rLi=i;}
-    if(pvH){ sw.push({idx:rHi,time:cs[rHi].time,price:rH,type:'H'}); [rL,rLi]=winMinL(i); rH=c.high;rHi=i; }
-    if(pvL){ sw.push({idx:rLi,time:cs[rLi].time,price:rL,type:'L'}); [rH,rHi]=winMaxH(i); rL=c.low;rLi=i; }
-    // REPAINT (nguyên lý Rudy): đỉnh/đáy TẠM chưa được cực trị đối diện confirm thì còn dời được.
-    // Dời đỉnh tạm sang đỉnh cao hơn -> huỷ đáy tạm đang dò (vì giá đã lên cao hơn). Ngược lại cho đáy.
-    if(sw.length){ const Lw=sw[sw.length-1];
-      if(Lw.type==='H' && rH>Lw.price){ Lw.idx=rHi; Lw.time=cs[rHi].time; Lw.price=rH; rL=c.low; rLi=i; }
-      if(Lw.type==='L' && rL<Lw.price){ Lw.idx=rLi; Lw.time=cs[rLi].time; Lw.price=rL; rH=c.high; rHi=i; }
+// ---------------- PIVOT = máy ĐỈNH/ĐÁY TẠM (nguyên tắc Rudy) ----------------
+// Đỉnh tạm & đáy tạm đi theo cặp, nối tiếp nhau. Khi đang theo 1 cực trị tạm:
+//   - Cực trị tạm CÒN DỜI ĐƯỢC: đáy tạm gặp đáy thấp hơn -> dời xuống; đỉnh tạm gặp đỉnh cao hơn -> dời lên.
+//   - Nó chỉ LOCK (thành pivot chính) khi giá đi NGƯỢC một biên độ >= thr -> coi như đã "tìm ra" cực trị đối diện.
+//     Lúc đó đổi phe, bắt đầu dò cực trị tạm ngược lại (và cái mới này lại còn dời được cho tới lượt lock sau).
+// => đáy A còn tự cập nhật xuống đáy thấp nhất CHO TỚI KHI đỉnh B xác nhận; đúng "B là cái nút lock của A".
+// Lưu ý: bar nào vừa lập cực trị mới thì KHÔNG cho lật ngay trong bar đó (chống whipsaw nến biên độ rộng).
+function computePivots(cs, thr){
+  const sw=[]; if(cs.length<2) return sw;
+  let dir=0, hiP=cs[0].high, hiI=0, loP=cs[0].low, loI=0;   // dir: 0 chưa biết, +1 đang dò đỉnh, -1 đang dò đáy
+  for(let i=1;i<cs.length;i++){
+    const c=cs[i]; let mH=false, mL=false;
+    if(dir>=0 && c.high>hiP){ hiP=c.high; hiI=i; mH=true; }  // đỉnh tạm dời lên
+    if(dir<=0 && c.low <loP){ loP=c.low;  loI=i; mL=true; }  // đáy tạm dời xuống
+    if(dir===0){                                             // bootstrap: chốt phe theo cú đi ngược đủ lớn đầu tiên
+      if(hiI>=loI && !mH && hiP-c.low>=thr){ sw.push({idx:hiI,time:cs[hiI].time,price:hiP,type:'H'}); dir=-1; loP=c.low; loI=i; }
+      else if(loI>hiI && !mL && c.high-loP>=thr){ sw.push({idx:loI,time:cs[loI].time,price:loP,type:'L'}); dir=1; hiP=c.high; hiI=i; }
+    } else if(dir>0){                                        // đang dò đỉnh: giá tụt >= thr -> LOCK đỉnh, quay đi tìm đáy
+      if(!mH && hiP-c.low>=thr){ sw.push({idx:hiI,time:cs[hiI].time,price:hiP,type:'H'}); dir=-1; loP=c.low; loI=i; }
+    } else {                                                 // đang dò đáy: giá bật >= thr -> LOCK đáy, quay đi tìm đỉnh
+      if(!mL && c.high-loP>=thr){ sw.push({idx:loI,time:cs[loI].time,price:loP,type:'L'}); dir=1; hiP=c.high; hiI=i; }
     }
   }
+  // cực trị tạm cuối còn đang dò (chưa lock) -> vẫn vẽ nhưng đánh dấu tentative
+  if(dir>0) sw.push({idx:hiI,time:cs[hiI].time,price:hiP,type:'H',tentative:true});
+  else if(dir<0) sw.push({idx:loI,time:cs[loI].time,price:loP,type:'L',tentative:true});
   return sw;
 }
 
@@ -296,9 +294,9 @@ function recalc(){
     const sens=parseInt(document.getElementById('detail').value);
     document.getElementById('detailV').textContent=sens;
     let lo=Infinity,hi=-Infinity; for(const c of candles){ if(c.low<lo)lo=c.low; if(c.high>hi)hi=c.high; }
-    const f=Math.pow((100-sens)/100,1.5)*0.15;          // sens cao = f nhỏ = nhiều chi tiết
-    const piv=computePivots(candles,3);                 // pivot mịn nhất (cố định)
-    algoSwings=externalize(simplify(piv, f*(hi-lo)));    // lọc sóng nhỏ -> giữ cấu trúc
+    const f=Math.pow((100-sens)/100,1.5)*0.15;          // sens cao = f nhỏ = ngưỡng nhỏ = nhiều chi tiết
+    const thr=Math.max(f*(hi-lo), (hi-lo)*1e-4);        // ngưỡng biên độ để LOCK cực trị tạm
+    algoSwings=externalize(computePivots(candles,thr)); // đỉnh/đáy tạm (đúng nguyên tắc) -> lọc cấu trúc HH/HL
   }else{
     const mr=parseFloat(document.getElementById('minRetr').value);
     document.getElementById('minRetrV').textContent=mr.toFixed(2);
