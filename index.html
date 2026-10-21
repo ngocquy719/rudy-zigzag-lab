@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-20·#6 (fix cực trị)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#7 (repaint đỉnh/đáy tạm)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -255,6 +255,12 @@ function computePivots(cs, len){
     if(rL===null||c.low<rL){rL=c.low;rLi=i;}
     if(pvH){ sw.push({idx:rHi,time:cs[rHi].time,price:rH,type:'H'}); [rL,rLi]=winMinL(i); rH=c.high;rHi=i; }
     if(pvL){ sw.push({idx:rLi,time:cs[rLi].time,price:rL,type:'L'}); [rH,rHi]=winMaxH(i); rL=c.low;rLi=i; }
+    // REPAINT (nguyên lý Rudy): đỉnh/đáy TẠM chưa được cực trị đối diện confirm thì còn dời được.
+    // Dời đỉnh tạm sang đỉnh cao hơn -> huỷ đáy tạm đang dò (vì giá đã lên cao hơn). Ngược lại cho đáy.
+    if(sw.length){ const Lw=sw[sw.length-1];
+      if(Lw.type==='H' && rH>Lw.price){ Lw.idx=rHi; Lw.time=cs[rHi].time; Lw.price=rH; rL=c.low; rLi=i; }
+      if(Lw.type==='L' && rL<Lw.price){ Lw.idx=rLi; Lw.time=cs[rLi].time; Lw.price=rL; rH=c.high; rHi=i; }
+    }
   }
   return sw;
 }
@@ -298,7 +304,9 @@ function recalc(){
     document.getElementById('minRetrV').textContent=mr.toFixed(2);
     algoSwings=computeZigzag(candles,mr);
   }
-  algoSeries.setData(algoSwings.map(s=>({time:s.time,value:s.price})));
+  // đảm bảo thời gian tăng dần + không trùng (lightweight-charts yêu cầu) — giữ điểm sau nếu trùng
+  const pts=[]; for(const s of algoSwings){ const p={time:s.time,value:s.price}; if(pts.length && pts[pts.length-1].time>=p.time) pts[pts.length-1]=p; else pts.push(p); }
+  algoSeries.setData(pts);
 }
 
 // ---------------- Edit: anh click đặt/xoá swing ----------------
