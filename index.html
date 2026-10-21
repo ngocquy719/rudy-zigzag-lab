@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#7 (repaint đỉnh/đáy tạm)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#8 (giữ cả đỉnh+đáy khi trùng nến)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -304,8 +304,10 @@ function recalc(){
     document.getElementById('minRetrV').textContent=mr.toFixed(2);
     algoSwings=computeZigzag(candles,mr);
   }
-  // đảm bảo thời gian tăng dần + không trùng (lightweight-charts yêu cầu) — giữ điểm sau nếu trùng
-  const pts=[]; for(const s of algoSwings){ const p={time:s.time,value:s.price}; if(pts.length && pts[pts.length-1].time>=p.time) pts[pts.length-1]=p; else pts.push(p); }
+  // đảm bảo thời gian tăng dần (lightweight-charts yêu cầu). KHI 1 nến vừa là đỉnh vừa là đáy
+  // (nến biên-độ-rộng) -> 2 vertex trùng bar: NHÍCH vertex sau +epsilon để GIỮ CẢ HAI,
+  // tuyệt đối không ghi đè (ghi đè = nuốt mất 1 đỉnh/đáy thật, gây "sai đỉnh" trên chart).
+  const pts=[]; for(const s of algoSwings){ let t=s.time; if(pts.length && t<=pts[pts.length-1].time) t=pts[pts.length-1].time+60; pts.push({time:t,value:s.price}); }
   algoSeries.setData(pts);
 }
 
