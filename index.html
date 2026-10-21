@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#9 (đỉnh/đáy tạm đúng nguyên tắc lock)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#10 (BOS/CHoCH + fibo discount + backtest)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -72,6 +72,13 @@
     <input id="minRetr" type="range" min="0.05" max="0.8" step="0.05" value="0.4" oninput="recalc()">
     <span id="minRetrV">0.40</span>
   </div>
+  <div class="ctl" id="stratCtl">
+    <label title="Hiện nhãn BOS/CHoCH + fibo + backtest"><input id="showSmc" type="checkbox" checked onchange="recalc()"> BOS/CHoCH+Fibo</label>
+    <label>Kèo:</label>
+    <select id="side" onchange="recalc()"><option value="both">Long+Short</option><option value="long">Long (discount)</option><option value="short">Short (premium)</option></select>
+    <label>Vào fib:</label><input id="efib" type="number" value="0.5" step="0.05" min="0.3" max="0.9" size="3" style="width:52px" oninput="recalc()">
+    <label>TP:</label><input id="tpR" type="number" value="2" step="0.5" min="0.5" max="5" size="3" style="width:48px" oninput="recalc()"><span style="color:var(--mut)">R</span>
+  </div>
   <div class="ctl">
     <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Chế độ vẽ của ANH: TẮT</button>
     <button class="warn" onclick="clearUser()">Xoá nét anh vẽ</button>
@@ -91,7 +98,9 @@
 <div id="chart"></div>
 
 <div class="hint">
+  <div id="stats" style="margin-bottom:6px; font-weight:600; color:#58a6ff"></div>
   <span class="legend"><span class="sw" style="background:#2157f3"></span> Zigzag của EM (thuật toán)</span>
+  <span class="legend" style="color:#8b949e">BOS</span><span class="legend" style="color:#e36209">CHoCH</span>
   <span class="legend"><span class="sw" style="background:#f7b500"></span> Nét ANH vẽ (click vào nến gần đỉnh/đáy để đặt swing; click lại để xoá)</span>
   — Bật <b>Chế độ vẽ</b> rồi click lên chart. Xong bấm <b>Export</b> và dán JSON vào chat cho em.
   <div id="exportOut" style="margin-top:6px; display:none;">
@@ -280,6 +289,85 @@ function simplify(sw, minMove){
   return arr;
 }
 
+// ---------------- SMC: nhãn CHoCH / BOS từ chuỗi swing ----------------
+// BOS = phá cấu trúc THUẬN xu hướng (đỉnh sau > đỉnh trước khi đang tăng / đáy sau < đáy trước khi đang giảm).
+// CHoCH = cú phá ĐẦU TIÊN ngược xu hướng đang chạy -> đổi tính chất. level = mức vừa bị phá.
+function labelStructure(sw){
+  const ev=[]; let pH=-Infinity,pL=Infinity,bias=0;
+  for(const s of sw){ if(s.tentative) continue;
+    if(s.type==='H'){ if(pH>-Infinity && s.price>pH){ ev.push({idx:s.idx,price:s.price,dir:1,type:bias>=0?'BOS':'CHoCH',level:pH}); bias=1; } pH=s.price; }
+    else { if(pL<Infinity && s.price<pL){ ev.push({idx:s.idx,price:s.price,dir:-1,type:bias<=0?'BOS':'CHoCH',level:pL}); bias=-1; } pL=s.price; }
+  }
+  return ev;
+}
+// ---------------- BACKTEST: vào vùng discount/premium (fib) sau khi cấu trúc phá ----------------
+// Không look-ahead: chỉ vào bằng lệnh CHỜ dưới/ trên giá sau khi đỉnh/đáy đã hình thành; thoát quét tiến,
+// CÙNG NẾN chạm cả SL+TP -> tính SL trước (bảo thủ). SL đặt tại cấu trúc (đáy/đỉnh leg), TP = bội số R.
+function backtest(cs, sw, {dir=1, entryFib=0.5, tpR=2, maxWait=60}={}){
+  const cf=sw.filter(s=>!s.tentative), trades=[];
+  for(let k=1;k<cf.length;k++){ const s=cf[k];
+    if(dir>0){ // LONG: đỉnh mới cao hơn đỉnh cũ -> mua hồi về discount của leg đáy->đỉnh
+      if(s.type!=='H') continue;
+      const prevH=cf.slice(0,k).filter(x=>x.type==='H').pop();
+      const legLow=cf.slice(0,k).filter(x=>x.type==='L').pop();
+      if(!prevH || s.price<=prevH.price || !legLow || legLow.idx>=s.idx) continue;
+      const H=s.price,L=legLow.price,entry=H-entryFib*(H-L),sl=L,risk=entry-sl; if(risk<=0) continue;
+      const tp=entry+tpR*risk;
+      let ei=-1; for(let j=s.idx+1;j<cs.length&&j<=s.idx+maxWait;j++){ if(cs[j].low<=sl)break; if(cs[j].low<=entry){ei=j;break;} }
+      if(ei<0) continue;
+      let win=null,xi=-1; for(let j=ei+1;j<cs.length;j++){ if(cs[j].low<=sl){win=false;xi=j;break;} if(cs[j].high>=tp){win=true;xi=j;break;} }
+      if(win===null) continue; trades.push({dir,entryIdx:ei,exitIdx:xi,win,R:win?tpR:-1});
+    } else {   // SHORT: đáy mới thấp hơn đáy cũ -> bán hồi lên premium của leg đỉnh->đáy
+      if(s.type!=='L') continue;
+      const prevL=cf.slice(0,k).filter(x=>x.type==='L').pop();
+      const legHigh=cf.slice(0,k).filter(x=>x.type==='H').pop();
+      if(!prevL || s.price>=prevL.price || !legHigh || legHigh.idx>=s.idx) continue;
+      const H=legHigh.price,L=s.price,entry=L+entryFib*(H-L),sl=H,risk=sl-entry; if(risk<=0) continue;
+      const tp=entry-tpR*risk;
+      let ei=-1; for(let j=s.idx+1;j<cs.length&&j<=s.idx+maxWait;j++){ if(cs[j].high>=sl)break; if(cs[j].high>=entry){ei=j;break;} }
+      if(ei<0) continue;
+      let win=null,xi=-1; for(let j=ei+1;j<cs.length;j++){ if(cs[j].high>=sl){win=false;xi=j;break;} if(cs[j].low<=tp){win=true;xi=j;break;} }
+      if(win===null) continue; trades.push({dir,entryIdx:ei,exitIdx:xi,win,R:win?tpR:-1});
+    }
+  }
+  return trades;
+}
+// vẽ fibo cho leg xung-lực gần nhất (đáy->đỉnh = discount cho long)
+let fibLines=[];
+function drawFib(){
+  fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[];
+  if(!document.getElementById('showSmc').checked) return;
+  const sw=algoSwings; let hi=null,lo=null;
+  for(let i=sw.length-1;i>=1;i--){ if(sw[i].type==='H'&&sw[i-1].type==='L'){ hi=sw[i]; lo=sw[i-1]; break; } }
+  if(!hi||!lo||hi.price<=lo.price) return;
+  const H=hi.price,rng=H-lo.price;
+  const L=[[0,'1.0 đỉnh','#30363d'],[0.5,'0.5 EQ (mép discount)','#8b949e'],[0.618,'0.618','#f7b500'],[0.705,'0.705 OTE','#e36209'],[0.786,'0.786','#f23645'],[1,'đáy','#30363d']];
+  for(const [r,lbl,col] of L){ fibLines.push(candleSeries.createPriceLine({price:H-r*rng,color:col,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:lbl})); }
+}
+function analyze(){
+  candleSeries.setMarkers([]);
+  const stats=document.getElementById('stats'); stats.textContent='';
+  if(document.getElementById('algo').value!=='fractal'){ fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[]; return; }
+  if(!document.getElementById('showSmc').checked){ drawFib(); return; }
+  const sw=algoSwings, ev=labelStructure(sw), markers=[];
+  for(const e of ev) markers.push({time:candles[e.idx].time,position:e.dir>0?'aboveBar':'belowBar',color:e.type==='CHoCH'?'#e36209':'#8b949e',shape:e.dir>0?'arrowUp':'arrowDown',text:e.type});
+  const side=document.getElementById('side').value;
+  const efib=parseFloat(document.getElementById('efib').value)||0.5;
+  const tpR=parseFloat(document.getElementById('tpR').value)||2;
+  let trades=[];
+  if(side==='long'||side==='both') trades=trades.concat(backtest(candles,sw,{dir:1,entryFib:efib,tpR}));
+  if(side==='short'||side==='both') trades=trades.concat(backtest(candles,sw,{dir:-1,entryFib:efib,tpR}));
+  for(const t of trades){ markers.push({time:candles[t.entryIdx].time,position:t.dir>0?'belowBar':'aboveBar',color:'#2157f3',shape:t.dir>0?'arrowUp':'arrowDown',text:'vào'});
+    markers.push({time:candles[t.exitIdx].time,position:t.win?'aboveBar':'belowBar',color:t.win?'#089981':'#f23645',shape:'circle',text:t.win?'TP':'SL'}); }
+  markers.sort((a,b)=>a.time-b.time);
+  candleSeries.setMarkers(markers);
+  drawFib();
+  const n=trades.length, wins=trades.filter(t=>t.win).length, sumR=trades.reduce((a,t)=>a+t.R,0);
+  stats.textContent = n
+    ? `📊 ${candles.length} nến · ${side.toUpperCase()} vào fib ${efib} TP ${tpR}R — N=${n} · Win ${(100*wins/n).toFixed(0)}% · tổng ${sumR>=0?'+':''}${sumR.toFixed(1)}R · TB ${(sumR/n).toFixed(2)}R/kèo  ⚠ in-sample · 1 cửa sổ · chưa tính phí/slippage`
+    : '📊 Chưa đủ kèo hợp lệ trong cửa sổ này (thử tăng số nến / đổi detail).';
+}
+
 function switchAlgo(){
   const algo=document.getElementById('algo').value;
   document.getElementById('fracCtl').style.display = algo==='fractal'?'flex':'none';
@@ -307,6 +395,7 @@ function recalc(){
   // tuyệt đối không ghi đè (ghi đè = nuốt mất 1 đỉnh/đáy thật, gây "sai đỉnh" trên chart).
   const pts=[]; for(const s of algoSwings){ let t=s.time; if(pts.length && t<=pts[pts.length-1].time) t=pts[pts.length-1].time+60; pts.push({time:t,value:s.price}); }
   algoSeries.setData(pts);
+  analyze();
 }
 
 // ---------------- Edit: anh click đặt/xoá swing ----------------
