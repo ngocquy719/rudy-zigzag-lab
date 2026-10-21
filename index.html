@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#10 (BOS/CHoCH + fibo discount + backtest)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#11 (BOS/CHoCH kẻ nét tại nến break-close)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -289,17 +289,27 @@ function simplify(sw, minMove){
   return arr;
 }
 
-// ---------------- SMC: nhãn CHoCH / BOS từ chuỗi swing ----------------
-// BOS = phá cấu trúc THUẬN xu hướng (đỉnh sau > đỉnh trước khi đang tăng / đáy sau < đáy trước khi đang giảm).
-// CHoCH = cú phá ĐẦU TIÊN ngược xu hướng đang chạy -> đổi tính chất. level = mức vừa bị phá.
+// ---------------- SMC: nhãn CHoCH / BOS tại CÂY NẾN BREAK (đóng nến vượt mức cũ) ----------------
+// Có đỉnh cũ 1100: khi một con sóng sau ĐÓNG NẾN vượt 1100 -> kẻ nét ngang TỪ đỉnh cũ SANG cây nến break đó,
+// đặt nhãn tại cây break. BOS = phá thuận xu hướng; CHoCH = phá đầu tiên ngược xu hướng. Break chỉ-wick KHÔNG tính.
+function findBreak(fromIdx,toIdx,level,dir){ // cây nến ĐẦU TIÊN đóng vượt level trong (fromIdx, toIdx]
+  for(let j=fromIdx+1;j<=toIdx;j++){ if(dir>0? candles[j].close>level : candles[j].close<level) return j; }
+  return -1; // không có nến đóng vượt -> không phải break hợp lệ
+}
 function labelStructure(sw){
-  const ev=[]; let pH=-Infinity,pL=Infinity,bias=0;
+  const ev=[]; let pHs=null,pLs=null,bias=0;   // pHs/pLs = swing H/L trước đó (giữ cả idx để kẻ nét)
   for(const s of sw){ if(s.tentative) continue;
-    if(s.type==='H'){ if(pH>-Infinity && s.price>pH){ ev.push({idx:s.idx,price:s.price,dir:1,type:bias>=0?'BOS':'CHoCH',level:pH}); bias=1; } pH=s.price; }
-    else { if(pL<Infinity && s.price<pL){ ev.push({idx:s.idx,price:s.price,dir:-1,type:bias<=0?'BOS':'CHoCH',level:pL}); bias=-1; } pL=s.price; }
+    if(s.type==='H'){ if(pHs && s.price>pHs.price){ const bo=findBreak(pHs.idx,s.idx,pHs.price,1);
+        if(bo>=0){ ev.push({pivotIdx:pHs.idx,breakIdx:bo,level:pHs.price,dir:1,type:bias>=0?'BOS':'CHoCH'}); bias=1; } } pHs=s; }
+    else { if(pLs && s.price<pLs.price){ const bo=findBreak(pLs.idx,s.idx,pLs.price,-1);
+        if(bo>=0){ ev.push({pivotIdx:pLs.idx,breakIdx:bo,level:pLs.price,dir:-1,type:bias<=0?'BOS':'CHoCH'}); bias=-1; } } pLs=s; }
   }
   return ev;
 }
+// pool các line-series kẻ nét ngang BOS/CHoCH (tái dùng, không add/remove mỗi lần recalc cho đỡ giật)
+let structPool=[];
+function ensureStruct(n){ while(structPool.length<n) structPool.push(chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false})); }
+function clearStruct(){ structPool.forEach(s=>s.setData([])); }
 // ---------------- BACKTEST: vào vùng discount/premium (fib) sau khi cấu trúc phá ----------------
 // Không look-ahead: chỉ vào bằng lệnh CHỜ dưới/ trên giá sau khi đỉnh/đáy đã hình thành; thoát quét tiến,
 // CÙNG NẾN chạm cả SL+TP -> tính SL trước (bảo thủ). SL đặt tại cấu trúc (đáy/đỉnh leg), TP = bội số R.
@@ -347,10 +357,16 @@ function drawFib(){
 function analyze(){
   candleSeries.setMarkers([]);
   const stats=document.getElementById('stats'); stats.textContent='';
-  if(document.getElementById('algo').value!=='fractal'){ fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[]; return; }
-  if(!document.getElementById('showSmc').checked){ drawFib(); return; }
+  if(document.getElementById('algo').value!=='fractal'){ fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[]; clearStruct(); return; }
+  if(!document.getElementById('showSmc').checked){ clearStruct(); drawFib(); return; }
   const sw=algoSwings, ev=labelStructure(sw), markers=[];
-  for(const e of ev) markers.push({time:candles[e.idx].time,position:e.dir>0?'aboveBar':'belowBar',color:e.type==='CHoCH'?'#e36209':'#8b949e',shape:e.dir>0?'arrowUp':'arrowDown',text:e.type});
+  ensureStruct(ev.length);
+  ev.forEach((e,i)=>{ const col=e.type==='CHoCH'?'#e36209':'#8b949e';
+    structPool[i].applyOptions({color:col});
+    structPool[i].setData([{time:candles[e.pivotIdx].time,value:e.level},{time:candles[e.breakIdx].time,value:e.level}]);  // nét ngang: mức cũ -> nến break
+    markers.push({time:candles[e.breakIdx].time,position:e.dir>0?'aboveBar':'belowBar',color:col,shape:e.dir>0?'arrowUp':'arrowDown',text:e.type});
+  });
+  for(let i=ev.length;i<structPool.length;i++) structPool[i].setData([]);
   const side=document.getElementById('side').value;
   const efib=parseFloat(document.getElementById('efib').value)||0.5;
   const tpR=parseFloat(document.getElementById('tpR').value)||2;
