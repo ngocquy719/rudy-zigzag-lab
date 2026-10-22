@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#27 (neo lệnh/nhãn đúng chỗ ở mọi khung)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#28 (1 ô khung · lệnh ở yên · phủ đủ bar)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -48,16 +48,12 @@
   </div>
   <div class="ctl" id="binCtl">
     <input id="sym" value="BTCUSDT" size="9" title="Symbol Binance">
-    <select id="tf" onchange="loadData()" title="Khung đang xem = INTERNAL">
+    <select id="tf" onchange="switchTF(this.value)" title="Đổi khung — lệnh & nhãn ở YÊN, chỉ zigzag/internal đổi">
       <option>1m</option><option>5m</option><option>15m</option><option>30m</option>
       <option selected>1h</option><option>4h</option><option>1d</option><option>1w</option>
     </select>
-    <label title="Khung LỚN làm EXTERNAL — fibo discount đo trên khung này (tím)">Ext:</label>
-    <select id="extTf" onchange="loadExt()">
-      <option value="">tắt</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option>
-    </select>
-    <input id="lim" type="number" value="500" min="100" max="1000" size="4" title="Số nến">
-    <button class="primary" onclick="loadData()">Tải</button>
+    <input id="lim" type="number" value="500" min="100" max="1000" size="4" title="Số nến (khi bấm Tải)">
+    <button class="primary" onclick="loadData()">Tải mới</button>
   </div>
   <div class="ctl">
     <label>Thuật toán:</label>
@@ -104,9 +100,6 @@
     <button class="warn" onclick="clearUser()">Xoá</button>
     <button class="primary" onclick="sendToClaude()">📨 Gửi cho em</button>
     <button class="primary" style="background:#6e40c9;border-color:#6e40c9" onclick="recvKeo()">📥 Nhận kèo EM</button>
-    <select id="sigTf" onchange="showSignalTF(this.value)" title="Đổi khung xem kèo (giữ nguyên chú thích)">
-      <option value="">khung kèo</option><option>4h</option><option>1h</option><option>15m</option><option>5m</option>
-    </select>
     <button onclick="doExport()">📤 Export (copy tay)</button>
     <span id="sendStatus" style="font-weight:600"></span>
   </div>
@@ -199,7 +192,7 @@ function drawFibZone(w){
   const useExt = extSwings.length>=2;
   const src = useExt? extSwings : algoSwings;
   const srcCd = useExt? extCandles : candles;
-  const tag = useExt? ('EXTERNAL '+document.getElementById('extTf').value) : 'external (khung đang xem)';
+  const tag = 'external';
   let hiS=null,loS=null;
   for(let i=src.length-1;i>=1;i--){ if(src[i].type==='H'&&src[i-1].type==='L'){ hiS=src[i]; loS=src[i-1]; break; } }
   if(!hiS||!loS||hiS.price<=loS.price) return;
@@ -715,8 +708,8 @@ function onChartClick(param){
   renderUser(); saveDrawings();
 }
 // ---- lưu/khôi phục theo mã (F5 không mất việc) ----
-function drawKey(){ return 'zz:'+document.getElementById('sym').value.toUpperCase()+':'+document.getElementById('tf').value; }
-function saveUI(){ try{ localStorage.setItem('zz:ui', JSON.stringify({sym:document.getElementById('sym').value,tf:document.getElementById('tf').value,extTf:document.getElementById('extTf').value,detail:document.getElementById('detail').value,fvg:!!(document.getElementById('showFvg')&&document.getElementById('showFvg').checked)})); }catch(e){} }
+function drawKey(){ return 'zz:'+document.getElementById('sym').value.toUpperCase(); }   // nét theo MÃ (đổi khung không mất)
+function saveUI(){ try{ localStorage.setItem('zz:ui', JSON.stringify({sym:document.getElementById('sym').value,tf:document.getElementById('tf').value,detail:document.getElementById('detail').value,fvg:!!(document.getElementById('showFvg')&&document.getElementById('showFvg').checked)})); }catch(e){} }
 function saveDrawings(){ try{ localStorage.setItem(drawKey(), JSON.stringify({userPoints,posOrder,userNotes,zones})); }catch(e){} saveUI(); }
 function restoreDrawings(){ try{ const s=localStorage.getItem(drawKey()); const o=s?JSON.parse(s):{}; userPoints=o.userPoints||[]; posOrder=o.posOrder||null; userNotes=o.userNotes||[]; zones=o.zones||[]; }catch(e){ userPoints=[];posOrder=null;userNotes=[];zones=[]; } renderUser(); drawOverlay(); }
 function renderUser(){
@@ -743,15 +736,23 @@ async function recvKeo(){
     await importSignal(sig);
   }catch(e){ st.style.color='#f23645'; st.textContent='lỗi nhận kèo: '+e.message; }
 }
-let activeSig=null;
-async function loadAround(sym,tf,center){
-  const bar=barSec[tf]||900, endMs=((center||Math.floor(Date.now()/1000))+150*bar)*1000;
-  const r=await fetch(`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${tf}&endTime=${endMs}&limit=500`);
-  const d=await r.json(); if(!Array.isArray(d)) return false;
-  candles=d.map(k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4]}));
-  candleSeries.setData(candles); return true;
+let activeSig=null, anchorTime=null;
+const VIEW_SPAN = 500*3600;   // ~500 nến H1 ≈ 20.8 ngày — GIỮ CỐ ĐỊNH cho mọi khung
+// ĐỔI KHUNG (1 ô duy nhất): giữ nguyên lệnh+nhãn (neo theo time/price), chỉ zigzag/internal đổi.
+// Tải đủ bar phủ CÙNG khoảng thời gian quanh neo (kèo=t0, hoặc nến mới nhất). H1 500 → M5 ~6000.
+async function switchTF(tf){
+  if(document.getElementById('src').value!=='binance'){ return loadData(); }
+  const sym=document.getElementById('sym').value.toUpperCase(), bar=barSec[tf]||3600;
+  const center = anchorTime || (candles.length?candles[candles.length-1].time:Math.floor(Date.now()/1000));
+  const startMs=(center-VIEW_SPAN)*1000, endMs=(center+Math.min(VIEW_SPAN*0.25,150*bar))*1000;
+  const st=document.getElementById('sendStatus'), oc=st.textContent; st.style.color='#8b949e'; st.textContent='⏳ nạp '+tf+'...';
+  try{ const cs=await fetchPaged(sym,tf,startMs,endMs); if(!cs.length){ st.textContent='lỗi nạp '+tf; return; }
+    candles=cs; candleSeries.setData(candles); recalc(); renderUser();
+    try{ chart.timeScale().setVisibleRange({from:center-120*bar, to:center+40*bar}); }catch(e){ chart.timeScale().fitContent(); }
+    drawOverlay(); st.textContent=oc; saveUI();
+  }catch(e){ st.style.color='#f23645'; st.textContent='lỗi nạp '+tf; }
 }
-function sigAnnotations(sig){   // chú thích của kèo (time+price nên hiện ở MỌI khung)
+function sigAnnotations(sig){   // chú thích kèo (time+price -> hiện ĐÚNG chỗ ở MỌI khung)
   userPoints=[]; userNotes=[]; zones=[];
   posOrder={dir:sig.dir>0?'long':'short', entry:sig.entry, sl:sig.sl, tp:sig.tp, t0:sig.t0};
   if(Array.isArray(sig.zones)) zones=sig.zones.slice();
@@ -761,24 +762,13 @@ function sigAnnotations(sig){   // chú thích của kèo (time+price nên hiệ
   userNotes.push({time:sig.t0,price:sig.sl,text:'SL (internal)'});
   userNotes.push({time:sig.t0,price:sig.tp,text:'TP (external, xa)'});
 }
-async function showSignalTF(tf){ if(!activeSig||!tf) return; document.getElementById('tf').value=tf;
-  const ok=await loadAround(activeSig.symbol,tf,activeSig.t0); if(!ok) return;
-  recalc(); renderUser(); const bar=barSec[tf]||900;
-  try{ chart.timeScale().setVisibleRange({from:activeSig.t0-130*bar,to:activeSig.t0+55*bar}); }catch(e){ chart.timeScale().fitContent(); }
-  drawOverlay();
-}
 async function importSignal(sig){
-  activeSig=sig; const tf=sig.tf||'15m';
+  activeSig=sig; anchorTime=sig.t0;
   document.getElementById('src').value='binance'; document.getElementById('binCtl').style.display='flex';
-  document.getElementById('sym').value=sig.symbol; document.getElementById('tf').value=tf; document.getElementById('sigTf').value=tf;
-  const ok=await loadAround(sig.symbol,tf,sig.t0); if(!ok){ alert('không tải được '+sig.symbol); return; }
-  sigAnnotations(sig);
-  document.getElementById('showFvg').checked=true;
-  recalc(); renderUser();
-  const bar=barSec[tf]||900;
-  try{ chart.timeScale().setVisibleRange({from:sig.t0-130*bar, to:sig.t0+55*bar}); }catch(e){ chart.timeScale().fitContent(); }
-  drawOverlay();
-  const st=document.getElementById('sendStatus'); st.style.color='#089981'; st.textContent=`✓ ${sig.symbol} ${sig.dir>0?'LONG':'SHORT'} RR ${sig.rr||''} — đổi "khung kèo" xem H1/M5`;
+  document.getElementById('sym').value=sig.symbol; document.getElementById('tf').value=sig.tf||'15m';
+  sigAnnotations(sig); document.getElementById('showFvg').checked=true;
+  await switchTF(sig.tf||'15m');
+  const st=document.getElementById('sendStatus'); st.style.color='#089981'; st.textContent=`✓ ${sig.symbol} ${sig.dir>0?'LONG':'SHORT'} RR ${sig.rr||''} — đổi KHUNG (ô trên) xem H4/H1/M15/M5, lệnh ở yên`;
 }
 // ---------------- Export ----------------
 const RELAY='https://ntfy.sh/rudy-zigzag-lab-7h3k9x2';  // kênh trung gian Claude đọc
@@ -789,7 +779,6 @@ function buildExport(){
     algo:document.getElementById('algo').value,
     detail:parseInt(document.getElementById('detail').value),
     minRetr:parseFloat(document.getElementById('minRetr').value),
-    extTf: document.getElementById('extTf').value,
     nCandles:candles.length,
     timeRange: candles.length?[candles[0].time,candles[candles.length-1].time]:null,
     algoSwings: algoSwings.map(s=>({t:s.time,p:+s.price.toFixed(5),type:s.type})),
@@ -831,6 +820,7 @@ async function loadData(){
   if(src==='sample') return loadSample();
 }
 async function loadBinance(){
+  anchorTime=null; activeSig=null;                  // Tải mới = về nến mới nhất, bỏ neo kèo
   const sym=document.getElementById('sym').value.toUpperCase();
   const tf=document.getElementById('tf').value;
   const lim=document.getElementById('lim').value;
@@ -890,7 +880,6 @@ function applyData(){
   recalc();
   chart.timeScale().fitContent();
   saveUI();
-  if(document.getElementById('extTf').value) loadExt();   // nạp lại EXTERNAL khung lớn theo mã/khung mới
 }
 
 // ---------------- Boot ----------------
@@ -899,7 +888,6 @@ initChart();
 try{ const ui=JSON.parse(localStorage.getItem('zz:ui')||'{}');
   if(ui.sym) document.getElementById('sym').value=ui.sym;
   if(ui.tf) document.getElementById('tf').value=ui.tf;
-  if(ui.extTf!=null) document.getElementById('extTf').value=ui.extTf;
   if(ui.detail!=null){ document.getElementById('detail').value=ui.detail; document.getElementById('detailV').textContent=ui.detail; }
   if(ui.fvg) document.getElementById('showFvg').checked=true;
 }catch(e){}
