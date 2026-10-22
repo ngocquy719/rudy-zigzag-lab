@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#26 (kèo đa-khung + nhãn external/internal/CHoCH)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#27 (neo lệnh/nhãn đúng chỗ ở mọi khung)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -187,6 +187,11 @@ function initChart(){
   window.addEventListener('orientationchange', ()=> setTimeout(()=>{chart.timeScale().fitContent();drawOverlay();},300));
 }
 function oline(a,b,c,d){ octx.beginPath(); octx.moveTo(a,b); octx.lineTo(c,d); octx.stroke(); }
+// toạ-độ-x của 1 THỜI ĐIỂM, snap về nến gần nhất của khung đang xem (lệnh/nhãn hiện đúng chỗ ở MỌI khung)
+function xOf(t,w,vr){ const ts=chart.timeScale(); let x=ts.timeToCoordinate(t); if(x!=null) return x;
+  let best=null,bd=Infinity; for(const c of candles){ const d=Math.abs(c.time-t); if(d<bd){bd=d;best=c.time;} }
+  if(best!=null){ x=ts.timeToCoordinate(best); if(x!=null) return x; }
+  return (vr && t<vr.from)?0:w; }
 // vẽ fibo đáy(external low) -> đỉnh(external high) của leg tăng gần nhất + tô vùng discount/premium
 function drawFibZone(w){
   if(!octx) return;
@@ -248,12 +253,10 @@ function drawOverlay(){
   drawZones(w,vr); drawPosition(w,vr); drawNotes(w,vr);
 }
 function drawZones(w,vr){
-  const ts=chart.timeScale(); octx.setLineDash([]);
-  const list = zoneMode&&zonePts.length===1 ? zones.concat([{t1:zonePts[0].t,p1:zonePts[0].p,t2:candles[candles.length-1].time,p2:zonePts[0].p}]) : zones;
+  octx.setLineDash([]);
   for(const z of zones){
     const yA=candleSeries.priceToCoordinate(z.p1), yB=candleSeries.priceToCoordinate(z.p2); if(yA==null||yB==null) continue;
-    let xA=ts.timeToCoordinate(z.t1); if(xA==null) xA=(z.t1<=vr.from)?0:w;
-    let xB=ts.timeToCoordinate(z.t2); if(xB==null) xB=(z.t2<=vr.from)?0:w;
+    const xA=xOf(z.t1,w,vr), xB=xOf(z.t2,w,vr);
     const x=Math.min(xA,xB), ww=Math.max(2,Math.abs(xB-xA)), y=Math.min(yA,yB), hh=Math.abs(yB-yA);
     octx.fillStyle='rgba(255,216,102,0.13)'; octx.fillRect(x,y,ww,hh);
     octx.strokeStyle='rgba(255,216,102,0.85)'; octx.lineWidth=1; octx.strokeRect(x,y,ww,hh);
@@ -281,11 +284,10 @@ function drawPosition(w,vr){
   const {dir,entry,sl,tp}=posOrder;
   const yE=candleSeries.priceToCoordinate(entry), yS=candleSeries.priceToCoordinate(sl), yT=candleSeries.priceToCoordinate(tp);
   if(yE==null||yS==null||yT==null) return;
-  const ts=chart.timeScale(), bar=candles.length>1?candles[1].time-candles[0].time:3600;
-  let x1 = posOrder.t0!=null ? ts.timeToCoordinate(posOrder.t0) : null;
-  if(x1==null) x1 = (posOrder.t0!=null && vr && posOrder.t0<vr.from) ? 0 : Math.round(w*0.45);
-  let x2 = posOrder.t0!=null ? ts.timeToCoordinate(posOrder.t0 + 40*bar) : null;
-  if(x2==null || x2>w) x2=w;
+  const bar=candles.length>1?candles[1].time-candles[0].time:3600;
+  let x1 = posOrder.t0!=null ? xOf(posOrder.t0,w,vr) : Math.round(w*0.45);
+  let x2 = posOrder.t0!=null ? xOf(posOrder.t0 + 40*bar,w,vr) : w;
+  if(x2>w) x2=w;
   if(x2 < x1+40) x2 = Math.min(x1+Math.round(w*0.35), w);
   octx.setLineDash([]);
   octx.fillStyle='rgba(8,153,129,0.16)'; octx.fillRect(x1,Math.min(yE,yT),x2-x1,Math.abs(yT-yE));
@@ -303,10 +305,10 @@ function drawPosition(w,vr){
   octx.textBaseline='top'; octx.fillStyle='#f85149'; octx.fillText(`SL ${sl.toPrecision(5)}`, x1+5, yS+3);
 }
 function drawNotes(w,vr){
-  if(!userNotes.length) return; const ts=chart.timeScale();
+  if(!userNotes.length) return;
   octx.textAlign='left'; octx.textBaseline='middle';
   for(const nt of userNotes){ const y=candleSeries.priceToCoordinate(nt.price); if(y==null) continue;
-    let x=ts.timeToCoordinate(nt.time); if(x==null) x=(nt.time<=vr.from)?0:w;
+    const x=xOf(nt.time,w,vr);
     const tw=octx.measureText(nt.text).width; octx.fillStyle='rgba(13,17,23,0.75)'; octx.fillRect(x+3,y-9,tw+16,18);
     octx.fillStyle='#ffd866'; octx.fillText('📝 '+nt.text, x+6, y+1);
   }
