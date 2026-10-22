@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#16 (fibo discount/premium + external H/L)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#17 (engine kèo đa-khung H-lớn->khung-nhỏ)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -74,6 +74,11 @@
   </div>
   <div class="ctl" id="stratCtl">
     <label title="Hiện nhãn BOS/CHoCH + fibo"><input id="showSmc" type="checkbox" checked onchange="recalc()"> BOS/CHoCH + Fibo</label>
+    <label title="Chạy kèo đa-khung: khung lớn BOS+discount, khung nhỏ CHoCH vào lệnh"><input id="runStrat" type="checkbox" onchange="toggleStrat()"> Chạy kèo</label>
+    <label>Khung nhỏ:</label>
+    <select id="stf" onchange="if(document.getElementById('runStrat').checked) loadSmall()">
+      <option>1m</option><option selected>5m</option><option>15m</option><option>30m</option>
+    </select>
   </div>
   <div class="ctl">
     <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Chế độ vẽ của ANH: TẮT</button>
@@ -416,12 +421,82 @@ function drawFib(){
   const L=[[0,'1.0 đỉnh','#30363d'],[0.5,'0.5 EQ (mép discount)','#8b949e'],[0.618,'0.618','#f7b500'],[0.705,'0.705 OTE','#e36209'],[0.786,'0.786','#f23645'],[1,'đáy','#30363d']];
   for(const [r,lbl,col] of L){ fibLines.push(candleSeries.createPriceLine({price:H-r*rng,color:col,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:lbl})); }
 }
+// ================= ENGINE KÈO ĐA-KHUNG =================
+// Khung lớn: BOS tăng -> fibo đáy(external low)->đỉnh(external high) -> vùng discount <0.5.
+// Khung nhỏ: trong discount xuất hiện CHoCH tăng -> ENTRY. SL dưới cấu trúc nhỏ, TP ~ external high.
+let smallCandles=[];
+function thrOf(cs){ let lo=Infinity,hi=-Infinity; for(const c of cs){ if(c.low<lo)lo=c.low; if(c.high>hi)hi=c.high; } return Math.max(Math.pow(0.4,1.5)*0.15*(hi-lo),(hi-lo)*1e-4); }
+// break cấu trúc tổng quát (dùng closes của cs truyền vào) -> sự kiện BOS/CHoCH + đáy trước (lowBefore)
+function structBreaks(cs, sw){
+  const ev=[]; let pHs=null,pLs=null,bias=0;
+  const fb=(a,b,lv,dir)=>{ for(let j=a+1;j<=b;j++){ if(dir>0?cs[j].close>lv:cs[j].close<lv) return j; } return -1; };
+  for(const s of sw){
+    if(s.type==='H'){ if(pHs&&s.price>pHs.price){ const bo=fb(pHs.idx,s.idx,pHs.price,1); if(bo>=0){ ev.push({breakIdx:bo,lowBefore:pLs,dir:1,type:bias>=0?'BOS':'CHoCH'}); bias=1; } } pHs=s; }
+    else { if(pLs&&s.price<pLs.price){ const bo=fb(pLs.idx,s.idx,pLs.price,-1); if(bo>=0){ ev.push({breakIdx:bo,dir:-1,type:bias<=0?'BOS':'CHoCH'}); bias=-1; } } pLs=s; }
+  }
+  return ev;
+}
+function bigIdxAtTime(t){ let lo=0,hi=candles.length-1,r=0; while(lo<=hi){const m=(lo+hi)>>1; if(candles[m].time<=t){r=m;lo=m+1;}else hi=m-1;} return r; }
+function runStrategyMTF(big, bigSwings, small){
+  const smSw=externalize(computePivots(small, thrOf(small)));
+  const smEv=structBreaks(small, smSw).filter(e=>e.dir===1&&e.type==='CHoCH');   // CHoCH tăng khung nhỏ
+  const cf=bigSwings.filter(s=>!s.tentative), trades=[];
+  for(let k=1;k<cf.length;k++){ const s=cf[k]; if(s.type!=='H')continue;
+    const prevH=cf.slice(0,k).filter(x=>x.type==='H').pop(), legLow=cf.slice(0,k).filter(x=>x.type==='L').pop();
+    if(!prevH||s.price<=prevH.price||!legLow||legLow.idx>=s.idx)continue;         // BOS tăng khung lớn
+    const H=s.price,L=legLow.price,mid=(H+L)/2,tStart=big[s.idx].time;
+    if(tStart<small[0].time)continue;                                            // ngoài vùng phủ khung nhỏ
+    let tInval=Infinity; for(let j=s.idx+1;j<big.length;j++){ if(big[j].close<L){tInval=big[j].time;break;} }   // đóng dưới L = huỷ
+    let entry=null;
+    for(const e of smEv){ const bt=small[e.breakIdx].time; if(bt<tStart||bt>tInval)continue;
+      const lowB=e.lowBefore?e.lowBefore.price:small[e.breakIdx].low;
+      if(!(lowB<=mid&&lowB>=L))continue;                                         // đáy pullback nhỏ PHẢI nằm trong discount
+      const en=small[e.breakIdx].close, sl=Math.min(lowB,small[e.breakIdx].low), tp=H, risk=en-sl;
+      if(risk<=0||en>=tp)continue;
+      entry={ei:e.breakIdx,enTime:bt,en,sl,tp,risk}; break;
+    }
+    if(!entry)continue;
+    let win=null,xTime=null;                                                     // forward khung nhỏ, SL trước
+    for(let j=entry.ei+1;j<small.length;j++){ if(small[j].low<=entry.sl){win=false;xTime=small[j].time;break;} if(small[j].high>=entry.tp){win=true;xTime=small[j].time;break;} }
+    if(win===null)continue;
+    trades.push({enTime:entry.enTime,xTime,win,R:win?(entry.tp-entry.en)/entry.risk:-1});
+  }
+  return trades;
+}
+async function fetchPaged(sym,itv,startMs,endMs){
+  let out=[],cur=startMs,g=0;
+  while(cur<endMs&&g++<12){ const r=await fetch(`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${itv}&startTime=${cur}&endTime=${endMs}&limit=1000`);
+    const d=await r.json(); if(!Array.isArray(d)||!d.length)break; out.push(...d); cur=d[d.length-1][0]+1; if(d.length<1000)break; }
+  const seen=new Set(),c=[]; for(const k of out){ const t=Math.floor(k[0]/1000); if(seen.has(t))continue; seen.add(t); c.push({time:t,open:+k[1],high:+k[2],low:+k[3],close:+k[4]}); } return c;
+}
+async function loadSmall(){
+  if(!candles.length || document.getElementById('src').value!=='binance') return;
+  const sym=document.getElementById('sym').value.toUpperCase(), stf=document.getElementById('stf').value;
+  const stats=document.getElementById('stats'); stats.textContent='⏳ đang tải '+stf+' (phân trang) cho kèo đa-khung...';
+  try{ smallCandles=await fetchPaged(sym,stf,candles[0].time*1000,(candles[candles.length-1].time+1)*1000); analyze(); }
+  catch(e){ stats.textContent='✗ tải '+stf+' lỗi: '+e.message; }
+}
+function toggleStrat(){ if(document.getElementById('runStrat').checked) loadSmall(); else { smallCandles=[]; candleSeries.setMarkers([]); recalc(); } }
+
 function analyze(){
   candleSeries.setMarkers([]);
-  document.getElementById('stats').textContent='';
+  const stats=document.getElementById('stats'); stats.textContent='';
   clearStruct();     // dọn line-series của bản cũ (nếu còn)
   fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[];
   drawOverlay();     // BOS/CHoCH + vùng fibo discount/premium, vẽ trên canvas phủ
+  // ----- kèo đa-khung (nếu bật) -----
+  const rs=document.getElementById('runStrat');
+  if(rs && rs.checked && smallCandles.length && document.getElementById('algo').value==='fractal'){
+    const trades=runStrategyMTF(candles, algoSwings, smallCandles), mk=[];
+    for(const t of trades){ const ei=bigIdxAtTime(t.enTime), xi=bigIdxAtTime(t.xTime);
+      mk.push({time:candles[ei].time,position:'belowBar',color:'#2157f3',shape:'arrowUp',text:'vào'});
+      mk.push({time:candles[xi].time,position:t.win?'aboveBar':'belowBar',color:t.win?'#089981':'#f23645',shape:'circle',text:t.win?'TP':'SL'}); }
+    mk.sort((a,b)=>a.time-b.time); candleSeries.setMarkers(mk);
+    const n=trades.length,w=trades.filter(t=>t.win).length,sr=trades.reduce((a,x)=>a+x.R,0);
+    stats.textContent = n
+      ? `📊 ${document.getElementById('tf').value}→${document.getElementById('stf').value} · N=${n} · Win ${(100*w/n).toFixed(0)}% · tổng ${sr>=0?'+':''}${sr.toFixed(1)}R · TB ${(sr/n).toFixed(2)}R/kèo  ⚠ in-sample · 1 cửa sổ · chưa phí`
+      : '📊 Chưa có kèo (giá chưa về discount rồi CHoCH khung nhỏ, hoặc khung nhỏ chưa phủ cửa sổ này).';
+  }
 }
 
 function switchAlgo(){
@@ -541,6 +616,7 @@ async function loadBinance(){
     if(!Array.isArray(d)) throw new Error(JSON.stringify(d));
     candles=d.map(k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4]}));
     applyData();
+    const rs=document.getElementById('runStrat'); if(rs && rs.checked) loadSmall();  // nạp khung nhỏ cho kèo
   }catch(e){ alert('Lỗi tải Binance: '+e.message+'\n(Thử symbol khác hoặc dùng CSV cho XAU/Oil)'); }
 }
 function parseCSV(txt){
