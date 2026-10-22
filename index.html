@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#14 (nhãn BOS/CHoCH giữa nét gạch-đứt)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#15 (nhãn BOS/CHoCH căn-giữa-nét, canvas overlay)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -111,9 +111,11 @@ let candles = [];           // {time, open, high, low, close}
 let userPoints = [];        // {time, price, type:'H'|'L'}
 let algoSwings = [];
 let editMode = false;
+let overlay, octx;          // canvas phủ để vẽ nhãn BOS/CHoCH căn-giữa-nét
 
 function initChart(){
   const el = document.getElementById('chart');
+  el.style.position='relative';
   chart = LightweightCharts.createChart(el, {
     autoSize:true,
     layout:{ background:{color:'#0e1117'}, textColor:'#e6edf3' },
@@ -130,8 +132,44 @@ function initChart(){
   algoSeries = chart.addLineSeries({ color:'#2157f3', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
   userSeries = chart.addLineSeries({ color:'#f7b500', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
   chart.subscribeClick(onChartClick);
+  // lớp canvas phủ (chỉ hiển thị, không chặn thao tác) để tự vẽ nét + nhãn BOS/CHoCH
+  overlay=document.createElement('canvas');
+  overlay.style.cssText='position:absolute;left:0;top:0;pointer-events:none;z-index:3;';
+  el.appendChild(overlay); octx=overlay.getContext('2d');
+  chart.timeScale().subscribeVisibleLogicalRangeChange(()=>drawOverlay());
+  if(window.ResizeObserver) new ResizeObserver(()=>drawOverlay()).observe(el);
   // autoSize:true đã tự co giãn theo khung; gọi fit khi xoay ngang/dọc điện thoại
-  window.addEventListener('orientationchange', ()=> setTimeout(()=>chart.timeScale().fitContent(),300));
+  window.addEventListener('orientationchange', ()=> setTimeout(()=>{chart.timeScale().fitContent();drawOverlay();},300));
+}
+// vẽ BOS/CHoCH: nét gạch-đứt ngang từ mức cũ -> nến break, nhãn CĂN GIỮA nét (----BOS----)
+function drawOverlay(){
+  if(!octx) return;
+  const el=document.getElementById('chart'), w=el.clientWidth, h=el.clientHeight, dpr=window.devicePixelRatio||1;
+  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){ overlay.width=Math.round(w*dpr); overlay.height=Math.round(h*dpr); overlay.style.width=w+'px'; overlay.style.height=h+'px'; }
+  octx.setTransform(dpr,0,0,dpr,0,0); octx.clearRect(0,0,w,h);
+  if(!candles.length || document.getElementById('algo').value!=='fractal' || !document.getElementById('showSmc').checked) return;
+  const ts=chart.timeScale(), vr=ts.getVisibleRange(); if(!vr) return;
+  const ev=labelStructure(algoSwings);
+  octx.font='600 11px system-ui,Segoe UI,Arial'; octx.textBaseline='middle';
+  for(const e of ev){
+    const y=candleSeries.priceToCoordinate(e.level); if(y==null) continue;
+    const t1=candles[e.pivotIdx].time, t2=candles[e.breakIdx].time;
+    let x1=ts.timeToCoordinate(t1); if(x1==null) x1=(t1<=vr.from)?0:w;
+    let x2=ts.timeToCoordinate(t2); if(x2==null) x2=(t2<=vr.from)?0:w;
+    if(x2<x1){ const t=x1; x1=x2; x2=t; }
+    if(x2-x1<2) continue;                         // nằm ngoài khung nhìn
+    const col=e.type==='CHoCH'?'#e36209':'#8b949e', lbl=e.type, tw=octx.measureText(lbl).width, xMid=(x1+x2)/2;
+    octx.strokeStyle=col; octx.lineWidth=1; octx.setLineDash([5,4]);
+    if(x2-x1>tw+14){                              // đủ rộng -> chừa khoảng giữa đặt chữ
+      const g=tw/2+5;
+      octx.beginPath(); octx.moveTo(x1,y); octx.lineTo(xMid-g,y); octx.stroke();
+      octx.beginPath(); octx.moveTo(xMid+g,y); octx.lineTo(x2,y); octx.stroke();
+      octx.setLineDash([]); octx.fillStyle=col; octx.textAlign='center'; octx.fillText(lbl,xMid,y);
+    } else {                                       // hẹp -> vẽ nét liền + chữ phía trên
+      octx.beginPath(); octx.moveTo(x1,y); octx.lineTo(x2,y); octx.stroke();
+      octx.setLineDash([]); octx.fillStyle=col; octx.textAlign='center'; octx.fillText(lbl,xMid,y-7);
+    }
+  }
 }
 
 // ---------------- Thuật toán zigzag (% độ sâu hồi) — bản PINE của em port sang JS ----------------
@@ -344,7 +382,7 @@ function backtest(cs, sw, {dir=1, entryFib=0.5, tpR=2, maxWait=60}={}){
 let fibLines=[];
 function drawFib(){
   fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[];
-  if(!document.getElementById('showSmc').checked) return;
+  if(document.getElementById('algo').value!=='fractal' || !document.getElementById('showSmc').checked) return;
   const sw=algoSwings; let hi=null,lo=null;
   for(let i=sw.length-1;i>=1;i--){ if(sw[i].type==='H'&&sw[i-1].type==='L'){ hi=sw[i]; lo=sw[i-1]; break; } }
   if(!hi||!lo||hi.price<=lo.price) return;
@@ -354,23 +392,10 @@ function drawFib(){
 }
 function analyze(){
   candleSeries.setMarkers([]);
-  const stats=document.getElementById('stats'); stats.textContent='';
-  if(document.getElementById('algo').value!=='fractal'){ fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[]; clearStruct(); return; }
-  if(!document.getElementById('showSmc').checked){ clearStruct(); drawFib(); return; }
-  const ev=labelStructure(algoSwings);
-  ensureStruct(ev.length);
-  ev.forEach((e,i)=>{ const col=e.type==='CHoCH'?'#e36209':'#8b949e'; const ls=structPool[i];
-    ls.applyOptions({color:col});
-    // nét gạch-đứt ngang từ mức cũ -> nến break; chèn 1 điểm GIỮA để treo nhãn ngay giữa nét: ----BOS----
-    const a=candles[e.pivotIdx].time, b=candles[e.breakIdx].time, data=[{time:a,value:e.level}];
-    const midIdx=Math.floor((e.pivotIdx+e.breakIdx)/2); let labelTime=b;
-    if(midIdx>e.pivotIdx && midIdx<e.breakIdx){ labelTime=candles[midIdx].time; data.push({time:labelTime,value:e.level}); }
-    data.push({time:b,value:e.level});
-    ls.setData(data);
-    ls.setMarkers([{time:labelTime,position:'inBar',color:col,shape:'circle',text:e.type}]);  // nhãn giữa nét, nằm trên line
-  });
-  for(let i=ev.length;i<structPool.length;i++){ structPool[i].setData([]); structPool[i].setMarkers([]); }
-  drawFib();
+  document.getElementById('stats').textContent='';
+  clearStruct();     // dọn line-series của bản cũ (nếu còn)
+  drawFib();         // fib price-lines
+  drawOverlay();     // BOS/CHoCH: nét + nhãn CĂN GIỮA, vẽ trên canvas phủ
 }
 
 function switchAlgo(){
