@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#15 (nhãn BOS/CHoCH căn-giữa-nét, canvas overlay)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#16 (fibo discount/premium + external H/L)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -141,6 +141,30 @@ function initChart(){
   // autoSize:true đã tự co giãn theo khung; gọi fit khi xoay ngang/dọc điện thoại
   window.addEventListener('orientationchange', ()=> setTimeout(()=>{chart.timeScale().fitContent();drawOverlay();},300));
 }
+function oline(a,b,c,d){ octx.beginPath(); octx.moveTo(a,b); octx.lineTo(c,d); octx.stroke(); }
+// vẽ fibo đáy(external low) -> đỉnh(external high) của leg tăng gần nhất + tô vùng discount/premium
+function drawFibZone(w){
+  if(!octx) return;
+  let hiS=null,loS=null;
+  for(let i=algoSwings.length-1;i>=1;i--){ if(algoSwings[i].type==='H'&&algoSwings[i-1].type==='L'){ hiS=algoSwings[i]; loS=algoSwings[i-1]; break; } }
+  if(!hiS||!loS||hiS.price<=loS.price) return;
+  const H=hiS.price, L=loS.price, mid=(H+L)/2;
+  const yH=candleSeries.priceToCoordinate(H), yL=candleSeries.priceToCoordinate(L), yM=candleSeries.priceToCoordinate(mid);
+  if(yH==null||yL==null||yM==null) return;
+  const ts=chart.timeScale(); let xs=ts.timeToCoordinate(candles[loS.idx].time); if(xs==null) xs=0; xs=Math.max(0,xs);
+  const xe=w;
+  octx.setLineDash([]);
+  octx.fillStyle='rgba(242,54,69,0.07)';  octx.fillRect(xs,Math.min(yH,yM),xe-xs,Math.abs(yM-yH));  // premium (0 -> 0.5)
+  octx.fillStyle='rgba(8,153,129,0.08)';  octx.fillRect(xs,Math.min(yM,yL),xe-xs,Math.abs(yL-yM));  // discount (0.5 -> 1.0)
+  octx.lineWidth=1;
+  octx.strokeStyle='rgba(230,237,243,0.45)'; oline(xs,yH,xe,yH);
+  octx.strokeStyle='rgba(242,54,69,0.55)';   oline(xs,yM,xe,yM);
+  octx.strokeStyle='rgba(8,153,129,0.55)';   oline(xs,yL,xe,yL);
+  octx.textAlign='left';
+  octx.textBaseline='bottom'; octx.fillStyle='#e6edf3'; octx.fillText('external high  '+H.toFixed(2), xs+5, yH-2);
+  octx.fillStyle='#f2a0a7';   octx.fillText('0.5  '+mid.toFixed(2), xs+5, yM-2);
+  octx.textBaseline='top';    octx.fillStyle='#7ee0c4'; octx.fillText('external low  '+L.toFixed(2), xs+5, yL+2);
+}
 // vẽ BOS/CHoCH: nét gạch-đứt ngang từ mức cũ -> nến break, nhãn CĂN GIỮA nét (----BOS----)
 function drawOverlay(){
   if(!octx) return;
@@ -150,7 +174,9 @@ function drawOverlay(){
   if(!candles.length || document.getElementById('algo').value!=='fractal' || !document.getElementById('showSmc').checked) return;
   const ts=chart.timeScale(), vr=ts.getVisibleRange(); if(!vr) return;
   const ev=labelStructure(algoSwings);
-  octx.font='600 11px system-ui,Segoe UI,Arial'; octx.textBaseline='middle';
+  octx.font='600 11px system-ui,Segoe UI,Arial';
+  drawFibZone(w);                 // vùng discount/premium của leg xung-lực gần nhất (bối cảnh khung lớn)
+  octx.textBaseline='middle';
   for(const e of ev){
     const y=candleSeries.priceToCoordinate(e.level); if(y==null) continue;
     const t1=candles[e.pivotIdx].time, t2=candles[e.breakIdx].time;
@@ -394,8 +420,8 @@ function analyze(){
   candleSeries.setMarkers([]);
   document.getElementById('stats').textContent='';
   clearStruct();     // dọn line-series của bản cũ (nếu còn)
-  drawFib();         // fib price-lines
-  drawOverlay();     // BOS/CHoCH: nét + nhãn CĂN GIỮA, vẽ trên canvas phủ
+  fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[];
+  drawOverlay();     // BOS/CHoCH + vùng fibo discount/premium, vẽ trên canvas phủ
 }
 
 function switchAlgo(){
