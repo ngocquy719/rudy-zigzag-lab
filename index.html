@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#17 (engine kèo đa-khung H-lớn->khung-nhỏ)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#18 (backtest CAUSAL leak-free)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -437,29 +437,44 @@ function structBreaks(cs, sw){
   return ev;
 }
 function bigIdxAtTime(t){ let lo=0,hi=candles.length-1,r=0; while(lo<=hi){const m=(lo+hi)>>1; if(candles[m].time<=t){r=m;lo=m+1;}else hi=m-1;} return r; }
-function runStrategyMTF(big, bigSwings, small){
-  const smSw=externalize(computePivots(small, thrOf(small)));
-  const smEv=structBreaks(small, smSw).filter(e=>e.dir===1&&e.type==='CHoCH');   // CHoCH tăng khung nhỏ
-  const cf=bigSwings.filter(s=>!s.tentative), trades=[];
-  for(let k=1;k<cf.length;k++){ const s=cf[k]; if(s.type!=='H')continue;
-    const prevH=cf.slice(0,k).filter(x=>x.type==='H').pop(), legLow=cf.slice(0,k).filter(x=>x.type==='L').pop();
-    if(!prevH||s.price<=prevH.price||!legLow||legLow.idx>=s.idx)continue;         // BOS tăng khung lớn
-    const H=s.price,L=legLow.price,mid=(H+L)/2,tStart=big[s.idx].time;
-    if(tStart<small[0].time)continue;                                            // ngoài vùng phủ khung nhỏ
-    let tInval=Infinity; for(let j=s.idx+1;j<big.length;j++){ if(big[j].close<L){tInval=big[j].time;break;} }   // đóng dưới L = huỷ
-    let entry=null;
-    for(const e of smEv){ const bt=small[e.breakIdx].time; if(bt<tStart||bt>tInval)continue;
+// ===== CAUSAL (point-in-time, không nhìn trước) =====
+// pivot ĐÃ LOCK + lockIdx = nến mà pivot được XÁC NHẬN (externalize toàn-cục bị leak vì repaint theo tương lai).
+function causalPivots(cs,thr){ const sw=[]; if(cs.length<2)return sw; let dir=0,hiP=cs[0].high,hiI=0,loP=cs[0].low,loI=0;
+  for(let i=1;i<cs.length;i++){ const c=cs[i]; let mH=false,mL=false;
+    if(dir>=0&&c.high>hiP){hiP=c.high;hiI=i;mH=true;} if(dir<=0&&c.low<loP){loP=c.low;loI=i;mL=true;}
+    if(dir===0){ if(hiI>=loI&&!mH&&hiP-c.low>=thr){sw.push({idx:hiI,price:hiP,type:'H',lockIdx:i});dir=-1;loP=c.low;loI=i;} else if(loI>hiI&&!mL&&c.high-loP>=thr){sw.push({idx:loI,price:loP,type:'L',lockIdx:i});dir=1;hiP=c.high;hiI=i;} }
+    else if(dir>0){ if(!mH&&hiP-c.low>=thr){sw.push({idx:hiI,price:hiP,type:'H',lockIdx:i});dir=-1;loP=c.low;loI=i;} }
+    else { if(!mL&&c.high-loP>=thr){sw.push({idx:loI,price:loP,type:'L',lockIdx:i});dir=1;hiP=c.high;hiI=i;} } }
+  return sw; }
+// break cấu trúc CAUSAL: quét nến, chỉ dùng pivot đã lock tới nến i; close vượt mức đã-biết -> event tại i
+function causalBreaks(cs,thr){ const piv=causalPivots(cs,thr),ev=[]; let pi=0,lastH=null,lastL=null,bias=0;
+  for(let i=0;i<cs.length;i++){ while(pi<piv.length&&piv[pi].lockIdx<=i){const p=piv[pi++];if(p.type==='H')lastH=p;else lastL=p;}
+    if(lastH&&cs[i].close>lastH.price){ev.push({breakIdx:i,dir:1,type:bias>=0?'BOS':'CHoCH',level:lastH.price,lowBefore:lastL});bias=1;lastH=null;}
+    else if(lastL&&cs[i].close<lastL.price){ev.push({breakIdx:i,dir:-1,type:bias<=0?'BOS':'CHoCH',level:lastL.price,highBefore:lastH});bias=-1;lastL=null;} }
+  return ev; }
+function runStrategyMTF(big, _unused, small){
+  const bp=causalPivots(big, thrOf(big));                                        // pivot khung lớn ĐÃ confirm
+  const smEv=causalBreaks(small, thrOf(small)).filter(e=>e.dir===1&&e.type==='CHoCH');  // CHoCH tăng khung nhỏ (causal)
+  const trades=[];
+  for(let k=0;k<bp.length;k++){ const s=bp[k]; if(s.type!=='H')continue;
+    const prevH=bp.slice(0,k).filter(x=>x.type==='H').pop(), legLow=bp.slice(0,k).filter(x=>x.type==='L'&&x.idx<s.idx).pop();
+    if(!prevH||s.price<=prevH.price||!legLow)continue;                           // HH = BOS tăng khung lớn
+    const H=s.price,L=legLow.price,mid=(H+L)/2, tReady=big[s.lockIdx].time;       // external high CHỈ biết sau khi lock
+    if(tReady<small[0].time)continue;
+    let tInval=Infinity; for(let j=s.idx+1;j<big.length;j++){ if(big[j].close<L){tInval=big[j].time;break;} }
+    let en=null;
+    for(const e of smEv){ const bt=small[e.breakIdx].time; if(bt<=tReady||bt>tInval)continue;   // vào SAU khi H xác nhận
       const lowB=e.lowBefore?e.lowBefore.price:small[e.breakIdx].low;
       if(!(lowB<=mid&&lowB>=L))continue;                                         // đáy pullback nhỏ PHẢI nằm trong discount
-      const en=small[e.breakIdx].close, sl=Math.min(lowB,small[e.breakIdx].low), tp=H, risk=en-sl;
-      if(risk<=0||en>=tp)continue;
-      entry={ei:e.breakIdx,enTime:bt,en,sl,tp,risk}; break;
+      const ep=small[e.breakIdx].close, sl=Math.min(lowB,small[e.breakIdx].low), risk=ep-sl;
+      if(risk<=0||ep>=H)continue;
+      en={ei:e.breakIdx,enTime:bt,ep,sl,tp:H,risk}; break;
     }
-    if(!entry)continue;
+    if(!en)continue;
     let win=null,xTime=null;                                                     // forward khung nhỏ, SL trước
-    for(let j=entry.ei+1;j<small.length;j++){ if(small[j].low<=entry.sl){win=false;xTime=small[j].time;break;} if(small[j].high>=entry.tp){win=true;xTime=small[j].time;break;} }
+    for(let j=en.ei+1;j<small.length;j++){ if(small[j].low<=en.sl){win=false;xTime=small[j].time;break;} if(small[j].high>=en.tp){win=true;xTime=small[j].time;break;} }
     if(win===null)continue;
-    trades.push({enTime:entry.enTime,xTime,win,R:win?(entry.tp-entry.en)/entry.risk:-1});
+    trades.push({enTime:en.enTime,xTime,win,R:win?(en.tp-en.ep)/en.risk:-1});
   }
   return trades;
 }
@@ -494,7 +509,7 @@ function analyze(){
     mk.sort((a,b)=>a.time-b.time); candleSeries.setMarkers(mk);
     const n=trades.length,w=trades.filter(t=>t.win).length,sr=trades.reduce((a,x)=>a+x.R,0);
     stats.textContent = n
-      ? `📊 ${document.getElementById('tf').value}→${document.getElementById('stf').value} · N=${n} · Win ${(100*w/n).toFixed(0)}% · tổng ${sr>=0?'+':''}${sr.toFixed(1)}R · TB ${(sr/n).toFixed(2)}R/kèo  ⚠ in-sample · 1 cửa sổ · chưa phí`
+      ? `📊 ${document.getElementById('tf').value}→${document.getElementById('stf').value} (CAUSAL leak-free) · N=${n} · Win ${(100*w/n).toFixed(0)}% · tổng ${sr>=0?'+':''}${sr.toFixed(1)}R · TB ${(sr/n).toFixed(2)}R/kèo  ⚠ 1 cửa sổ · chưa phí`
       : '📊 Chưa có kèo (giá chưa về discount rồi CHoCH khung nhỏ, hoặc khung nhỏ chưa phủ cửa sổ này).';
   }
 }
