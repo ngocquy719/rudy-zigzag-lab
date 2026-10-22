@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#24 (chọn nhãn tự bật vẽ)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#25 (Nhận kèo EM: web vẽ kèo em gửi)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -103,6 +103,7 @@
     <label title="Hiện FVG (khoảng trống chưa lấp)"><input id="showFvg" type="checkbox" onchange="drawOverlay();saveUI()"> FVG</label>
     <button class="warn" onclick="clearUser()">Xoá</button>
     <button class="primary" onclick="sendToClaude()">📨 Gửi cho em</button>
+    <button class="primary" style="background:#6e40c9;border-color:#6e40c9" onclick="recvKeo()">📥 Nhận kèo EM</button>
     <button onclick="doExport()">📤 Export (copy tay)</button>
     <span id="sendStatus" style="font-weight:600"></span>
   </div>
@@ -726,6 +727,37 @@ function renderUser(){
 }
 function clearUser(){ userPoints=[]; posOrder=null; pendingDir=null; dragHandle=null; userNotes=[]; zones=[]; zonePts=[]; zoneMode=false; renderUser(); document.getElementById('sendStatus').textContent=''; drawOverlay(); saveDrawings(); }
 
+// ---------------- Nhận kèo EM gửi (Claude -> web) ----------------
+const KEO='https://ntfy.sh/rudy-zigzag-lab-keo-7h3k9x2';
+const barSec={'1m':60,'5m':300,'15m':900,'30m':1800,'1h':3600,'4h':14400,'1d':86400,'1w':604800};
+async function recvKeo(){
+  const st=document.getElementById('sendStatus'); st.style.color='#a371f7'; st.textContent='⏳ nhận kèo...';
+  try{ const r=await fetch(KEO+'/json?poll=1&since=24h'); const txt=await r.text();
+    const lines=txt.trim().split(/\r?\n/).filter(Boolean); if(!lines.length){ st.textContent='chưa có kèo nào'; return; }
+    const sig=JSON.parse(JSON.parse(lines[lines.length-1]).message);
+    await importSignal(sig);
+  }catch(e){ st.style.color='#f23645'; st.textContent='lỗi nhận kèo: '+e.message; }
+}
+async function importSignal(sig){
+  const tf=sig.tf||'15m';
+  document.getElementById('src').value='binance'; document.getElementById('binCtl').style.display='flex';
+  document.getElementById('sym').value=sig.symbol; document.getElementById('tf').value=tf;
+  const bar=barSec[tf]||900, endMs=((sig.t0||Math.floor(Date.now()/1000))+150*bar)*1000;
+  const r=await fetch(`https://api.binance.com/api/v3/klines?symbol=${sig.symbol}&interval=${tf}&endTime=${endMs}&limit=500`);
+  const d=await r.json(); if(!Array.isArray(d)){ alert('không tải được '+sig.symbol); return; }
+  candles=d.map(k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4]}));
+  candleSeries.setData(candles);
+  userPoints=[]; userNotes=[]; zones=[]; posOrder=null;
+  posOrder={dir:sig.dir>0?'long':'short', entry:sig.entry, sl:sig.sl, tp:sig.tp, t0:sig.t0};
+  if(Array.isArray(sig.zones)) zones=sig.zones.slice();
+  if(sig.note) userNotes.push({time:sig.t0, price:sig.entry, text:sig.note});
+  document.getElementById('showFvg').checked=true;
+  recalc(); renderUser();
+  if(sig.t0){ try{ chart.timeScale().setVisibleRange({from:sig.t0-130*bar, to:sig.t0+55*bar}); }catch(e){ chart.timeScale().fitContent(); } }
+  else chart.timeScale().fitContent();
+  drawOverlay();
+  const st=document.getElementById('sendStatus'); st.style.color='#089981'; st.textContent=`✓ ${sig.symbol} ${sig.dir>0?'LONG':'SHORT'} RR ${sig.rr||''} — soi cấu trúc + lệnh`;
+}
 // ---------------- Export ----------------
 const RELAY='https://ntfy.sh/rudy-zigzag-lab-7h3k9x2';  // kênh trung gian Claude đọc
 function buildExport(){
