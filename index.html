@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#18 (backtest CAUSAL leak-free)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#19 (CAUSAL + luật RR tối thiểu)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -79,6 +79,8 @@
     <select id="stf" onchange="if(document.getElementById('runStrat').checked) loadSmall()">
       <option>1m</option><option selected>5m</option><option>15m</option><option>30m</option>
     </select>
+    <label title="Chỉ vào lệnh nếu TP/SL đạt tỉ lệ này trở lên">RR tối thiểu:</label>
+    <input id="minRR" type="number" value="2" step="0.5" min="1" max="5" size="3" style="width:52px" oninput="recalc()">
   </div>
   <div class="ctl">
     <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Chế độ vẽ của ANH: TẮT</button>
@@ -453,6 +455,7 @@ function causalBreaks(cs,thr){ const piv=causalPivots(cs,thr),ev=[]; let pi=0,la
     else if(lastL&&cs[i].close<lastL.price){ev.push({breakIdx:i,dir:-1,type:bias<=0?'BOS':'CHoCH',level:lastL.price,highBefore:lastH});bias=-1;lastL=null;} }
   return ev; }
 function runStrategyMTF(big, _unused, small){
+  const minRR=parseFloat(document.getElementById('minRR')?.value)||2;            // LUẬT RR của Rudy
   const bp=causalPivots(big, thrOf(big));                                        // pivot khung lớn ĐÃ confirm
   const smEv=causalBreaks(small, thrOf(small)).filter(e=>e.dir===1&&e.type==='CHoCH');  // CHoCH tăng khung nhỏ (causal)
   const trades=[];
@@ -468,6 +471,7 @@ function runStrategyMTF(big, _unused, small){
       if(!(lowB<=mid&&lowB>=L))continue;                                         // đáy pullback nhỏ PHẢI nằm trong discount
       const ep=small[e.breakIdx].close, sl=Math.min(lowB,small[e.breakIdx].low), risk=ep-sl;
       if(risk<=0||ep>=H)continue;
+      if((H-ep)/risk < minRR) continue;                                         // không đạt RR 1:minRR -> bỏ, chờ CHoCH sâu hơn
       en={ei:e.breakIdx,enTime:bt,ep,sl,tp:H,risk}; break;
     }
     if(!en)continue;
@@ -509,7 +513,7 @@ function analyze(){
     mk.sort((a,b)=>a.time-b.time); candleSeries.setMarkers(mk);
     const n=trades.length,w=trades.filter(t=>t.win).length,sr=trades.reduce((a,x)=>a+x.R,0);
     stats.textContent = n
-      ? `📊 ${document.getElementById('tf').value}→${document.getElementById('stf').value} (CAUSAL leak-free) · N=${n} · Win ${(100*w/n).toFixed(0)}% · tổng ${sr>=0?'+':''}${sr.toFixed(1)}R · TB ${(sr/n).toFixed(2)}R/kèo  ⚠ 1 cửa sổ · chưa phí`
+      ? `📊 ${document.getElementById('tf').value}→${document.getElementById('stf').value} RR≥${document.getElementById('minRR').value} (CAUSAL) · N=${n} · Win ${(100*w/n).toFixed(0)}% · tổng ${sr>=0?'+':''}${sr.toFixed(1)}R · EV ${(sr/n).toFixed(2)}R/kèo  ⚠ 1 cửa sổ · chưa phí`
       : '📊 Chưa có kèo (giá chưa về discount rồi CHoCH khung nhỏ, hoặc khung nhỏ chưa phủ cửa sổ này).';
   }
 }
