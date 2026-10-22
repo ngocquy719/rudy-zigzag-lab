@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#13 (nhãn tại breakout, tắt SL/TP, swap khung tự nạp)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#14 (nhãn BOS/CHoCH giữa nét gạch-đứt)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -306,7 +306,7 @@ function labelStructure(sw){
 }
 // pool các line-series kẻ nét ngang BOS/CHoCH (tái dùng, không add/remove mỗi lần recalc cho đỡ giật)
 let structPool=[];
-function ensureStruct(n){ while(structPool.length<n) structPool.push(chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false})); }
+function ensureStruct(n){ while(structPool.length<n) structPool.push(chart.addLineSeries({lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false})); }
 function clearStruct(){ structPool.forEach(s=>{ s.setData([]); s.setMarkers([]); }); }
 // ---------------- BACKTEST: vào vùng discount/premium (fib) sau khi cấu trúc phá ----------------
 // Không look-ahead: chỉ vào bằng lệnh CHỜ dưới/ trên giá sau khi đỉnh/đáy đã hình thành; thoát quét tiến,
@@ -361,9 +361,13 @@ function analyze(){
   ensureStruct(ev.length);
   ev.forEach((e,i)=>{ const col=e.type==='CHoCH'?'#e36209':'#8b949e'; const ls=structPool[i];
     ls.applyOptions({color:col});
-    ls.setData([{time:candles[e.pivotIdx].time,value:e.level},{time:candles[e.breakIdx].time,value:e.level}]);   // nét ngang: mức cũ -> nến break
-    // nhãn nằm NGAY TRÊN NÉT tại điểm breakout (gắn vào line-series), KHÔNG trôi lên đỉnh nến
-    ls.setMarkers([{time:candles[e.breakIdx].time,position:e.dir>0?'aboveBar':'belowBar',color:col,shape:e.dir>0?'arrowUp':'arrowDown',text:e.type}]);
+    // nét gạch-đứt ngang từ mức cũ -> nến break; chèn 1 điểm GIỮA để treo nhãn ngay giữa nét: ----BOS----
+    const a=candles[e.pivotIdx].time, b=candles[e.breakIdx].time, data=[{time:a,value:e.level}];
+    const midIdx=Math.floor((e.pivotIdx+e.breakIdx)/2); let labelTime=b;
+    if(midIdx>e.pivotIdx && midIdx<e.breakIdx){ labelTime=candles[midIdx].time; data.push({time:labelTime,value:e.level}); }
+    data.push({time:b,value:e.level});
+    ls.setData(data);
+    ls.setMarkers([{time:labelTime,position:'inBar',color:col,shape:'circle',text:e.type}]);  // nhãn giữa nét, nằm trên line
   });
   for(let i=ev.length;i<structPool.length;i++){ structPool[i].setData([]); structPool[i].setMarkers([]); }
   drawFib();
