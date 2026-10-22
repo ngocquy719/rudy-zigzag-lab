@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#20 (EXTERNAL khung lớn + đánh dấu int/ext)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#21 (công cụ Lệnh E-SL-TP + nhãn BOS/CHoCH/HH-HL)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -87,11 +87,17 @@
     <input id="minRR" type="number" value="2" step="0.5" min="1" max="5" size="3" style="width:52px" oninput="recalc()">
   </div>
   <div class="ctl">
-    <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Chế độ vẽ của ANH: TẮT</button>
-    <select id="degree" title="Đánh dấu Internal (khung nhỏ) hay External (khung lớn)">
+    <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Vẽ nhãn: TẮT</button>
+    <select id="mkKind" title="Loại nhãn khi click">
+      <option value="H">Swing H</option><option value="L">Swing L</option>
+      <option value="HH">HH</option><option value="HL">HL</option><option value="LH">LH</option><option value="LL">LL</option>
+      <option value="BOS">BOS</option><option value="CHoCH">CHoCH</option>
+    </select>
+    <select id="degree" title="Internal (khung nhỏ) hay External (khung lớn)">
       <option value="int">Internal</option><option value="ext">External</option>
     </select>
-    <button class="warn" onclick="clearUser()">Xoá nét anh vẽ</button>
+    <button id="posBtn" class="mode" onclick="togglePos()" title="Click Entry → SL → TP">📍 Lệnh</button>
+    <button class="warn" onclick="clearUser()">Xoá</button>
     <button class="primary" onclick="sendToClaude()">📨 Gửi cho em</button>
     <button onclick="doExport()">📤 Export (copy tay)</button>
     <span id="sendStatus" style="font-weight:600"></span>
@@ -111,8 +117,8 @@
   <div id="stats" style="margin-bottom:6px; font-weight:600; color:#58a6ff"></div>
   <span class="legend"><span class="sw" style="background:#2157f3"></span> Zigzag của EM (thuật toán)</span>
   <span class="legend" style="color:#8b949e">BOS</span><span class="legend" style="color:#e36209">CHoCH</span>
-  <span class="legend"><span class="sw" style="background:#f7b500"></span> Nét ANH vẽ (click vào nến gần đỉnh/đáy để đặt swing; click lại để xoá)</span>
-  — Bật <b>Chế độ vẽ</b> rồi click lên chart. Xong bấm <b>Export</b> và dán JSON vào chat cho em.
+  <span class="legend"><span class="sw" style="background:#f7b500"></span> int</span><span class="legend"><span class="sw" style="background:#a371f7"></span> EXT nét anh</span>
+  — <b>✏️ Vẽ nhãn</b>: chọn loại (H/L/HH/HL/LH/LL/BOS/CHoCH) + Internal/External rồi click (click lại = xoá). <b>📍 Lệnh</b>: click Entry → SL → TP (tự tính RR). Xong bấm <b>📨 Gửi cho em</b>.
   <div id="exportOut" style="margin-top:6px; display:none;">
     <textarea id="exportText" readonly></textarea>
     <button onclick="copyExport()">Copy</button> <span id="copied"></span>
@@ -127,6 +133,7 @@ let algoSwings = [];
 let editMode = false;
 let overlay, octx;          // canvas phủ để vẽ nhãn BOS/CHoCH căn-giữa-nét
 let extCandles=[], extSwings=[], extSeries;   // cấu trúc EXTERNAL = từ khung LỚN (H1/H4), KHÁC internal của khung đang xem
+let posMode=false, posClicks=[], posLines=[], posOrder=null;   // công cụ vẽ Lệnh (Entry/SL/TP)
 
 function initChart(){
   const el = document.getElementById('chart');
@@ -583,37 +590,53 @@ async function loadExt(){
 // ---------------- Edit: anh click đặt/xoá swing ----------------
 function toggleEdit(){
   editMode=!editMode;
+  if(editMode && posMode){ posMode=false; posClicks=[]; posBtnUI(); }   // 2 chế độ loại trừ nhau
   const b=document.getElementById('editBtn');
-  b.textContent='✏️ Chế độ vẽ của ANH: '+(editMode?'BẬT':'TẮT');
+  b.textContent='✏️ Vẽ nhãn: '+(editMode?'BẬT':'TẮT');
   b.classList.toggle('modeOn',editMode);
 }
 function onChartClick(param){
+  if(posMode){ if(param.point){ const pr=candleSeries.coordinateToPrice(param.point.y); if(pr!=null){ posClicks.push(pr); updatePosHint();
+    if(posClicks.length===3){ drawPos(posClicks[0],posClicks[1],posClicks[2]); posMode=false; posBtnUI(); } } } return; }
   if(!editMode || !param.time || !param.point) return;
-  const price=candleSeries.coordinateToPrice(param.point.y);
-  if(price==null) return;
-  // tìm nến gần nhất theo time
+  const price=candleSeries.coordinateToPrice(param.point.y); if(price==null) return;
   let best=null,bd=Infinity;
   for(const c of candles){ const d=Math.abs(c.time-param.time); if(d<bd){bd=d;best=c;} }
   if(!best) return;
-  // snap vào high hay low tuỳ click gần cái nào
-  const toH=Math.abs(price-best.high), toL=Math.abs(price-best.low);
-  const type=toH<=toL?'H':'L';
-  const snapP=type==='H'?best.high:best.low;
-  // toggle: nếu đã có điểm ở nến này -> xoá
-  const deg=document.getElementById('degree').value;
-  const existing=userPoints.findIndex(p=>p.time===best.time);
+  const kind=document.getElementById('mkKind').value, deg=document.getElementById('degree').value;
+  const highType=['H','HH','LH'].includes(kind), lowType=['L','HL','LL'].includes(kind);
+  const snapP = highType?best.high : lowType?best.low : price;   // BOS/CHoCH tại giá click
+  const existing=userPoints.findIndex(p=>p.time===best.time && p.kind===kind);
   if(existing>=0) userPoints.splice(existing,1);
-  else userPoints.push({time:best.time,price:snapP,type,deg});
+  else userPoints.push({time:best.time,price:snapP,kind,deg,hl:highType?'H':lowType?'L':'B'});
   renderUser();
 }
 function renderUser(){
   userPoints.sort((a,b)=>a.time-b.time);
-  userSeries.setData(userPoints.map(p=>({time:p.time,value:p.price})));
-  userSeries.setMarkers(userPoints.map(p=>({time:p.time,position:p.type==='H'?'aboveBar':'belowBar',
-    color:p.deg==='ext'?'#a371f7':'#f7b500', shape:p.type==='H'?'arrowDown':'arrowUp',
-    text:(p.deg==='ext'?'EXT·':'int·')+p.type})));
+  // nét nối chỉ qua các điểm SWING (H/L), không qua nhãn BOS/CHoCH
+  const sw=userPoints.filter(p=>p.hl!=='B');
+  userSeries.setData(sw.map(p=>({time:p.time,value:p.price})));
+  userSeries.setMarkers(userPoints.map(p=>({
+    time:p.time, position:p.hl==='L'?'belowBar':'aboveBar',
+    color: p.kind==='BOS'?'#8b949e' : p.kind==='CHoCH'?'#e36209' : (p.deg==='ext'?'#a371f7':'#f7b500'),
+    shape: p.hl==='B'?'circle':(p.hl==='H'?'arrowDown':'arrowUp'),
+    text:(p.deg==='ext'?'EXT ':'')+p.kind })));
 }
-function clearUser(){ userPoints=[]; renderUser(); }
+function clearUser(){ userPoints=[]; renderUser(); posClicks=[]; posOrder=null; posLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); posLines=[]; document.getElementById('sendStatus').textContent=''; }
+// ---- công cụ vẽ LỆNH (Entry -> SL -> TP) ----
+function posBtnUI(){ const b=document.getElementById('posBtn'); b.classList.toggle('modeOn',posMode); b.textContent=posMode?'📍 click Entry':'📍 Lệnh'; }
+function updatePosHint(){ const b=document.getElementById('posBtn'); if(posMode) b.textContent=['📍 click Entry','📍 click SL','📍 click TP'][posClicks.length]||'📍'; }
+function togglePos(){ posMode=!posMode; posClicks=[]; if(posMode){ editMode=false; document.getElementById('editBtn').textContent='✏️ Vẽ nhãn: TẮT'; document.getElementById('editBtn').classList.remove('modeOn'); } posBtnUI(); }
+function drawPos(entry,sl,tp){
+  posLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); posLines=[];
+  const dir = tp>=entry?'LONG':'SHORT';
+  const rr = Math.abs(entry-sl)>1e-12 ? Math.abs(tp-entry)/Math.abs(entry-sl) : 0;
+  posOrder={entry:+entry,sl:+sl,tp:+tp,dir,rr:+rr.toFixed(2)};
+  posLines.push(candleSeries.createPriceLine({price:entry,color:'#58a6ff',lineWidth:2,axisLabelVisible:true,title:'Entry '+entry.toPrecision(5)}));
+  posLines.push(candleSeries.createPriceLine({price:sl,color:'#f23645',lineWidth:2,lineStyle:2,axisLabelVisible:true,title:'SL '+sl.toPrecision(5)}));
+  posLines.push(candleSeries.createPriceLine({price:tp,color:'#089981',lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`TP · ${dir} · RR ${rr.toFixed(2)}`}));
+  const st=document.getElementById('sendStatus'); st.style.color='#58a6ff'; st.textContent=`${dir}  Entry ${entry.toPrecision(5)}  SL ${sl.toPrecision(5)}  TP ${tp.toPrecision(5)}  RR ${rr.toFixed(2)}`;
+}
 
 // ---------------- Export ----------------
 const RELAY='https://ntfy.sh/rudy-zigzag-lab-7h3k9x2';  // kênh trung gian Claude đọc
@@ -629,7 +652,8 @@ function buildExport(){
     timeRange: candles.length?[candles[0].time,candles[candles.length-1].time]:null,
     algoSwings: algoSwings.map(s=>({t:s.time,p:+s.price.toFixed(5),type:s.type})),
     extSwings: extSwings.map(s=>({t:s.time,p:+s.price.toFixed(5),type:s.type})),
-    userSwings: userPoints.map(p=>({t:p.time,p:+p.price.toFixed(5),type:p.type,deg:p.deg||'int'})),
+    userSwings: userPoints.map(p=>({t:p.time,p:+p.price.toFixed(5),kind:p.kind,hl:p.hl,deg:p.deg||'int'})),
+    positionOrder: posOrder,
   };
 }
 function doExport(){
