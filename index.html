@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#23 (lưu F5 + neo lệnh + Zone + FVG nhiều)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#24 (chọn nhãn tự bật vẽ)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -88,12 +88,12 @@
   </div>
   <div class="ctl">
     <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Vẽ nhãn: TẮT</button>
-    <select id="mkKind" title="Loại nhãn khi click">
+    <select id="mkKind" title="Chọn là tự bật chế độ vẽ, click lên nến là đánh dấu" onchange="markReady()">
       <option value="H">Swing H</option><option value="L">Swing L</option>
       <option value="HH">HH</option><option value="HL">HL</option><option value="LH">LH</option><option value="LL">LL</option>
       <option value="BOS">BOS</option><option value="CHoCH">CHoCH</option>
     </select>
-    <select id="degree" title="Internal (khung nhỏ) hay External (khung lớn)">
+    <select id="degree" title="Internal (khung nhỏ) hay External (khung lớn)" onchange="markReady()">
       <option value="int">Internal</option><option value="ext">External</option>
     </select>
     <button class="mode" onclick="startPos('long')" style="color:#3fb950" title="Click đặt Entry, rồi kéo SL/TP">🟢 Long</button>
@@ -678,6 +678,7 @@ function toggleEdit(){
   b.classList.toggle('modeOn',editMode);
 }
 let noteMode=false;
+function markReady(){ editMode=true; pendingDir=null; noteMode=false; zoneMode=false; const b=document.getElementById('editBtn'); b.textContent='✏️ Vẽ nhãn: BẬT'; b.classList.add('modeOn'); }
 function startPos(dir){ pendingDir=dir; editMode=false; noteMode=false; const b=document.getElementById('editBtn'); b.textContent='✏️ Vẽ nhãn: TẮT'; b.classList.remove('modeOn'); const st=document.getElementById('sendStatus'); st.style.color='#8b949e'; st.textContent='Click lên chart để đặt Entry '+(dir==='long'?'LONG 🟢':'SHORT 🔴')+' (xong kéo SL/TP)'; }
 function startNote(){ noteMode=true; pendingDir=null; editMode=false; document.getElementById('sendStatus').textContent='Click lên chart để đặt ghi chú'; }
 function createPos(entry,dir,t0){
