@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#19 (CAUSAL + luật RR tối thiểu)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#20 (EXTERNAL khung lớn + đánh dấu int/ext)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -48,9 +48,13 @@
   </div>
   <div class="ctl" id="binCtl">
     <input id="sym" value="BTCUSDT" size="9" title="Symbol Binance">
-    <select id="tf" onchange="loadData()" title="Đổi khung -> tự nạp lại đúng khung đó">
+    <select id="tf" onchange="loadData()" title="Khung đang xem = INTERNAL">
       <option>1m</option><option>5m</option><option>15m</option><option>30m</option>
       <option selected>1h</option><option>4h</option><option>1d</option><option>1w</option>
+    </select>
+    <label title="Khung LỚN làm EXTERNAL — fibo discount đo trên khung này (tím)">Ext:</label>
+    <select id="extTf" onchange="loadExt()">
+      <option value="">tắt</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option>
     </select>
     <input id="lim" type="number" value="500" min="100" max="1000" size="4" title="Số nến">
     <button class="primary" onclick="loadData()">Tải</button>
@@ -84,6 +88,9 @@
   </div>
   <div class="ctl">
     <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Chế độ vẽ của ANH: TẮT</button>
+    <select id="degree" title="Đánh dấu Internal (khung nhỏ) hay External (khung lớn)">
+      <option value="int">Internal</option><option value="ext">External</option>
+    </select>
     <button class="warn" onclick="clearUser()">Xoá nét anh vẽ</button>
     <button class="primary" onclick="sendToClaude()">📨 Gửi cho em</button>
     <button onclick="doExport()">📤 Export (copy tay)</button>
@@ -119,6 +126,7 @@ let userPoints = [];        // {time, price, type:'H'|'L'}
 let algoSwings = [];
 let editMode = false;
 let overlay, octx;          // canvas phủ để vẽ nhãn BOS/CHoCH căn-giữa-nét
+let extCandles=[], extSwings=[], extSeries;   // cấu trúc EXTERNAL = từ khung LỚN (H1/H4), KHÁC internal của khung đang xem
 
 function initChart(){
   const el = document.getElementById('chart');
@@ -138,6 +146,7 @@ function initChart(){
   candleSeries = chart.addCandlestickSeries({ upColor:'#089981', downColor:'#f23645', borderVisible:false, wickUpColor:'#089981', wickDownColor:'#f23645' });
   algoSeries = chart.addLineSeries({ color:'#2157f3', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
   userSeries = chart.addLineSeries({ color:'#f7b500', lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+  extSeries  = chart.addLineSeries({ color:'#a371f7', lineWidth:2, lineStyle:0, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false }); // zigzag EXTERNAL (tím)
   chart.subscribeClick(onChartClick);
   // lớp canvas phủ (chỉ hiển thị, không chặn thao tác) để tự vẽ nét + nhãn BOS/CHoCH
   overlay=document.createElement('canvas');
@@ -152,13 +161,18 @@ function oline(a,b,c,d){ octx.beginPath(); octx.moveTo(a,b); octx.lineTo(c,d); o
 // vẽ fibo đáy(external low) -> đỉnh(external high) của leg tăng gần nhất + tô vùng discount/premium
 function drawFibZone(w){
   if(!octx) return;
+  // Fibo đo trên EXTERNAL (khung lớn) nếu có; chỉ dùng swing khung-đang-xem khi CHƯA bật Ext.
+  const useExt = extSwings.length>=2;
+  const src = useExt? extSwings : algoSwings;
+  const srcCd = useExt? extCandles : candles;
+  const tag = useExt? ('EXTERNAL '+document.getElementById('extTf').value) : 'external (khung đang xem)';
   let hiS=null,loS=null;
-  for(let i=algoSwings.length-1;i>=1;i--){ if(algoSwings[i].type==='H'&&algoSwings[i-1].type==='L'){ hiS=algoSwings[i]; loS=algoSwings[i-1]; break; } }
+  for(let i=src.length-1;i>=1;i--){ if(src[i].type==='H'&&src[i-1].type==='L'){ hiS=src[i]; loS=src[i-1]; break; } }
   if(!hiS||!loS||hiS.price<=loS.price) return;
   const H=hiS.price, L=loS.price, mid=(H+L)/2;
   const yH=candleSeries.priceToCoordinate(H), yL=candleSeries.priceToCoordinate(L), yM=candleSeries.priceToCoordinate(mid);
   if(yH==null||yL==null||yM==null) return;
-  const ts=chart.timeScale(); let xs=ts.timeToCoordinate(candles[loS.idx].time); if(xs==null) xs=0; xs=Math.max(0,xs);
+  const ts=chart.timeScale(); let xs=ts.timeToCoordinate(srcCd[loS.idx].time); if(xs==null) xs=0; xs=Math.max(0,xs);
   const xe=w;
   octx.setLineDash([]);
   octx.fillStyle='rgba(242,54,69,0.07)';  octx.fillRect(xs,Math.min(yH,yM),xe-xs,Math.abs(yM-yH));  // premium (0 -> 0.5)
@@ -168,9 +182,9 @@ function drawFibZone(w){
   octx.strokeStyle='rgba(242,54,69,0.55)';   oline(xs,yM,xe,yM);
   octx.strokeStyle='rgba(8,153,129,0.55)';   oline(xs,yL,xe,yL);
   octx.textAlign='left';
-  octx.textBaseline='bottom'; octx.fillStyle='#e6edf3'; octx.fillText('external high  '+H.toFixed(2), xs+5, yH-2);
-  octx.fillStyle='#f2a0a7';   octx.fillText('0.5  '+mid.toFixed(2), xs+5, yM-2);
-  octx.textBaseline='top';    octx.fillStyle='#7ee0c4'; octx.fillText('external low  '+L.toFixed(2), xs+5, yL+2);
+  octx.textBaseline='bottom'; octx.fillStyle='#a371f7'; octx.fillText(tag+' high  '+H.toFixed(4), xs+5, yH-2);
+  octx.fillStyle='#f2a0a7';   octx.fillText('0.5  '+mid.toFixed(4), xs+5, yM-2);
+  octx.textBaseline='top';    octx.fillStyle='#a371f7'; octx.fillText(tag+' low  '+L.toFixed(4), xs+5, yL+2);
 }
 // vẽ BOS/CHoCH: nét gạch-đứt ngang từ mức cũ -> nến break, nhãn CĂN GIỮA nét (----BOS----)
 function drawOverlay(){
@@ -545,7 +559,25 @@ function recalc(){
   // tuyệt đối không ghi đè (ghi đè = nuốt mất 1 đỉnh/đáy thật, gây "sai đỉnh" trên chart).
   const pts=[]; for(const s of algoSwings){ let t=s.time; if(pts.length && t<=pts[pts.length-1].time) t=pts[pts.length-1].time+60; pts.push({time:t,value:s.price}); }
   algoSeries.setData(pts);
+  // EXTERNAL = cấu trúc khung LỚN (không phải swing khung đang xem)
+  if(extCandles.length){
+    let elo=Infinity,ehi=-Infinity; for(const c of extCandles){ if(c.low<elo)elo=c.low; if(c.high>ehi)ehi=c.high; }
+    const ef=Math.pow((100-60)/100,1.5)*0.15;
+    extSwings=externalize(computePivots(extCandles, Math.max(ef*(ehi-elo),(ehi-elo)*1e-4)));
+    const ep=[]; for(const s of extSwings){ let t=s.time; if(ep.length && t<=ep[ep.length-1].time) t=ep[ep.length-1].time+1; ep.push({time:t,value:s.price}); }
+    if(extSeries) extSeries.setData(ep);
+  } else { extSwings=[]; if(extSeries) extSeries.setData([]); }
   analyze();
+}
+async function loadExt(){
+  const etf=document.getElementById('extTf').value;
+  if(!etf || document.getElementById('src').value!=='binance'){ extCandles=[]; recalc(); return; }
+  const sym=document.getElementById('sym').value.toUpperCase();
+  try{ const r=await fetch(`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${etf}&limit=500`);
+    const d=await r.json(); if(!Array.isArray(d)) throw 0;
+    extCandles=d.map(k=>({time:Math.floor(k[0]/1000),open:+k[1],high:+k[2],low:+k[3],close:+k[4]}));
+    recalc();
+  }catch(e){ extCandles=[]; recalc(); }
 }
 
 // ---------------- Edit: anh click đặt/xoá swing ----------------
@@ -568,15 +600,18 @@ function onChartClick(param){
   const type=toH<=toL?'H':'L';
   const snapP=type==='H'?best.high:best.low;
   // toggle: nếu đã có điểm ở nến này -> xoá
+  const deg=document.getElementById('degree').value;
   const existing=userPoints.findIndex(p=>p.time===best.time);
   if(existing>=0) userPoints.splice(existing,1);
-  else userPoints.push({time:best.time,price:snapP,type});
+  else userPoints.push({time:best.time,price:snapP,type,deg});
   renderUser();
 }
 function renderUser(){
   userPoints.sort((a,b)=>a.time-b.time);
   userSeries.setData(userPoints.map(p=>({time:p.time,value:p.price})));
-  userSeries.setMarkers(userPoints.map(p=>({time:p.time,position:p.type==='H'?'aboveBar':'belowBar',color:'#f7b500',shape:p.type==='H'?'arrowDown':'arrowUp',text:p.type})));
+  userSeries.setMarkers(userPoints.map(p=>({time:p.time,position:p.type==='H'?'aboveBar':'belowBar',
+    color:p.deg==='ext'?'#a371f7':'#f7b500', shape:p.type==='H'?'arrowDown':'arrowUp',
+    text:(p.deg==='ext'?'EXT·':'int·')+p.type})));
 }
 function clearUser(){ userPoints=[]; renderUser(); }
 
@@ -589,10 +624,12 @@ function buildExport(){
     algo:document.getElementById('algo').value,
     detail:parseInt(document.getElementById('detail').value),
     minRetr:parseFloat(document.getElementById('minRetr').value),
+    extTf: document.getElementById('extTf').value,
     nCandles:candles.length,
     timeRange: candles.length?[candles[0].time,candles[candles.length-1].time]:null,
     algoSwings: algoSwings.map(s=>({t:s.time,p:+s.price.toFixed(5),type:s.type})),
-    userSwings: userPoints.map(p=>({t:p.time,p:+p.price.toFixed(5),type:p.type})),
+    extSwings: extSwings.map(s=>({t:s.time,p:+s.price.toFixed(5),type:s.type})),
+    userSwings: userPoints.map(p=>({t:p.time,p:+p.price.toFixed(5),type:p.type,deg:p.deg||'int'})),
   };
 }
 function doExport(){
@@ -684,6 +721,7 @@ function applyData(){
   userPoints=[]; renderUser();
   recalc();
   chart.timeScale().fitContent();
+  if(document.getElementById('extTf').value) loadExt();   // nạp lại EXTERNAL khung lớn theo mã/khung mới
 }
 
 // ---------------- Boot ----------------
