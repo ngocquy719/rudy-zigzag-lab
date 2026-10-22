@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#29 (xem kèo tự khớp detail engine)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#30 (external detail 34)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -748,7 +748,7 @@ async function switchTF(tf){
   const st=document.getElementById('sendStatus'), oc=st.textContent; st.style.color='#8b949e'; st.textContent='⏳ nạp '+tf+'...';
   try{ const cs=await fetchPaged(sym,tf,startMs,endMs); if(!cs.length){ st.textContent='lỗi nạp '+tf; return; }
     candles=cs; candleSeries.setData(candles);
-    if(activeSig){ const d=['1h','4h','1d','1w'].includes(tf)?46:66;   // khớp ngưỡng engine: external 0.06 / internal 0.03
+    if(activeSig){ const d=['1h','4h','1d','1w'].includes(tf)?34:66;   // khớp engine MỚI: external 0.08 (detail 34) / internal 0.03 (66)
       document.getElementById('detail').value=d; document.getElementById('detailV').textContent=d; }
     recalc(); renderUser();
     try{ chart.timeScale().setVisibleRange({from:center-120*bar, to:center+40*bar}); }catch(e){ chart.timeScale().fitContent(); }
