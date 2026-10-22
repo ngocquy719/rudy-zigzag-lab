@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#21 (công cụ Lệnh E-SL-TP + nhãn BOS/CHoCH/HH-HL)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#22 (Long/Short kéo SL-TP + FVG + Note)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -96,7 +96,10 @@
     <select id="degree" title="Internal (khung nhỏ) hay External (khung lớn)">
       <option value="int">Internal</option><option value="ext">External</option>
     </select>
-    <button id="posBtn" class="mode" onclick="togglePos()" title="Click Entry → SL → TP">📍 Lệnh</button>
+    <button class="mode" onclick="startPos('long')" style="color:#3fb950" title="Click đặt Entry, rồi kéo SL/TP">🟢 Long</button>
+    <button class="mode" onclick="startPos('short')" style="color:#f85149" title="Click đặt Entry, rồi kéo SL/TP">🔴 Short</button>
+    <button class="mode" onclick="startNote()" title="Click đặt ghi chú">📝 Note</button>
+    <label title="Hiện FVG (khoảng trống chưa lấp)"><input id="showFvg" type="checkbox" onchange="drawOverlay()"> FVG</label>
     <button class="warn" onclick="clearUser()">Xoá</button>
     <button class="primary" onclick="sendToClaude()">📨 Gửi cho em</button>
     <button onclick="doExport()">📤 Export (copy tay)</button>
@@ -133,7 +136,7 @@ let algoSwings = [];
 let editMode = false;
 let overlay, octx;          // canvas phủ để vẽ nhãn BOS/CHoCH căn-giữa-nét
 let extCandles=[], extSwings=[], extSeries;   // cấu trúc EXTERNAL = từ khung LỚN (H1/H4), KHÁC internal của khung đang xem
-let posMode=false, posClicks=[], posLines=[], posOrder=null;   // công cụ vẽ Lệnh (Entry/SL/TP)
+let posOrder=null, pendingDir=null, dragHandle=null, userNotes=[];   // lệnh Long/Short kéo được + ghi chú
 
 function initChart(){
   const el = document.getElementById('chart');
@@ -161,6 +164,19 @@ function initChart(){
   el.appendChild(overlay); octx=overlay.getContext('2d');
   chart.timeScale().subscribeVisibleLogicalRangeChange(()=>drawOverlay());
   if(window.ResizeObserver) new ResizeObserver(()=>drawOverlay()).observe(el);
+  // kéo SL/TP/Entry của lệnh (chặn pan khi chạm handle)
+  const hitH=my=>{ if(!posOrder) return null; const yE=candleSeries.priceToCoordinate(posOrder.entry),yS=candleSeries.priceToCoordinate(posOrder.sl),yT=candleSeries.priceToCoordinate(posOrder.tp);
+    if(yS!=null&&Math.abs(my-yS)<10)return'sl'; if(yT!=null&&Math.abs(my-yT)<10)return'tp'; if(yE!=null&&Math.abs(my-yE)<10)return'entry'; return null; };
+  const lock=on=>chart.applyOptions({handleScroll:!on?{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false}:false, handleScale:!on});
+  const pDown=(cy,e)=>{ const r=el.getBoundingClientRect(); const h=hitH(cy-r.top); if(h){ dragHandle=h; lock(true); e.stopPropagation(); if(e.cancelable)e.preventDefault(); } };
+  const pMove=cy=>{ if(!dragHandle) return; const r=el.getBoundingClientRect(); const pr=candleSeries.coordinateToPrice(cy-r.top); if(pr==null)return; posOrder[dragHandle]=pr; drawOverlay(); updatePosStatus(); };
+  const pUp=()=>{ if(dragHandle){ dragHandle=null; lock(false); } };
+  el.addEventListener('mousedown',e=>pDown(e.clientY,e),true);
+  window.addEventListener('mousemove',e=>pMove(e.clientY));
+  window.addEventListener('mouseup',pUp);
+  el.addEventListener('touchstart',e=>{ if(e.touches[0]) pDown(e.touches[0].clientY,e); },{capture:true,passive:false});
+  window.addEventListener('touchmove',e=>{ if(dragHandle&&e.touches[0]){ pMove(e.touches[0].clientY); if(e.cancelable)e.preventDefault(); } },{passive:false});
+  window.addEventListener('touchend',pUp);
   // autoSize:true đã tự co giãn theo khung; gọi fit khi xoay ngang/dọc điện thoại
   window.addEventListener('orientationchange', ()=> setTimeout(()=>{chart.timeScale().fitContent();drawOverlay();},300));
 }
@@ -199,30 +215,77 @@ function drawOverlay(){
   const el=document.getElementById('chart'), w=el.clientWidth, h=el.clientHeight, dpr=window.devicePixelRatio||1;
   if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){ overlay.width=Math.round(w*dpr); overlay.height=Math.round(h*dpr); overlay.style.width=w+'px'; overlay.style.height=h+'px'; }
   octx.setTransform(dpr,0,0,dpr,0,0); octx.clearRect(0,0,w,h);
-  if(!candles.length || document.getElementById('algo').value!=='fractal' || !document.getElementById('showSmc').checked) return;
+  if(!candles.length) return;
   const ts=chart.timeScale(), vr=ts.getVisibleRange(); if(!vr) return;
-  const ev=labelStructure(algoSwings);
   octx.font='600 11px system-ui,Segoe UI,Arial';
-  drawFibZone(w);                 // vùng discount/premium của leg xung-lực gần nhất (bối cảnh khung lớn)
-  octx.textBaseline='middle';
-  for(const e of ev){
-    const y=candleSeries.priceToCoordinate(e.level); if(y==null) continue;
-    const t1=candles[e.pivotIdx].time, t2=candles[e.breakIdx].time;
-    let x1=ts.timeToCoordinate(t1); if(x1==null) x1=(t1<=vr.from)?0:w;
-    let x2=ts.timeToCoordinate(t2); if(x2==null) x2=(t2<=vr.from)?0:w;
-    if(x2<x1){ const t=x1; x1=x2; x2=t; }
-    if(x2-x1<2) continue;                         // nằm ngoài khung nhìn
-    const col=e.type==='CHoCH'?'#e36209':'#8b949e', lbl=e.type, tw=octx.measureText(lbl).width, xMid=(x1+x2)/2;
-    octx.strokeStyle=col; octx.lineWidth=1; octx.setLineDash([5,4]);
-    if(x2-x1>tw+14){                              // đủ rộng -> chừa khoảng giữa đặt chữ
-      const g=tw/2+5;
-      octx.beginPath(); octx.moveTo(x1,y); octx.lineTo(xMid-g,y); octx.stroke();
-      octx.beginPath(); octx.moveTo(xMid+g,y); octx.lineTo(x2,y); octx.stroke();
-      octx.setLineDash([]); octx.fillStyle=col; octx.textAlign='center'; octx.fillText(lbl,xMid,y);
-    } else {                                       // hẹp -> vẽ nét liền + chữ phía trên
-      octx.beginPath(); octx.moveTo(x1,y); octx.lineTo(x2,y); octx.stroke();
-      octx.setLineDash([]); octx.fillStyle=col; octx.textAlign='center'; octx.fillText(lbl,xMid,y-7);
+  const fv=document.getElementById('showFvg'); if(fv && fv.checked) drawFVGs(w,vr);
+  if(document.getElementById('algo').value==='fractal' && document.getElementById('showSmc').checked){
+    drawFibZone(w);
+    octx.textBaseline='middle';
+    for(const e of labelStructure(algoSwings)){
+      const y=candleSeries.priceToCoordinate(e.level); if(y==null) continue;
+      const t1=candles[e.pivotIdx].time, t2=candles[e.breakIdx].time;
+      let x1=ts.timeToCoordinate(t1); if(x1==null) x1=(t1<=vr.from)?0:w;
+      let x2=ts.timeToCoordinate(t2); if(x2==null) x2=(t2<=vr.from)?0:w;
+      if(x2<x1){ const t=x1; x1=x2; x2=t; }
+      if(x2-x1<2) continue;
+      const col=e.type==='CHoCH'?'#e36209':'#8b949e', lbl=e.type, tw=octx.measureText(lbl).width, xMid=(x1+x2)/2;
+      octx.strokeStyle=col; octx.lineWidth=1; octx.setLineDash([5,4]);
+      if(x2-x1>tw+14){ const g=tw/2+5;
+        octx.beginPath(); octx.moveTo(x1,y); octx.lineTo(xMid-g,y); octx.stroke();
+        octx.beginPath(); octx.moveTo(xMid+g,y); octx.lineTo(x2,y); octx.stroke();
+        octx.setLineDash([]); octx.fillStyle=col; octx.textAlign='center'; octx.fillText(lbl,xMid,y);
+      } else { octx.beginPath(); octx.moveTo(x1,y); octx.lineTo(x2,y); octx.stroke();
+        octx.setLineDash([]); octx.fillStyle=col; octx.textAlign='center'; octx.fillText(lbl,xMid,y-7); }
     }
+  }
+  drawPosition(w); drawNotes(w,vr);
+}
+// FVG (khoảng trống chưa lấp) 200 nến gần nhất: xanh=tăng, đỏ=giảm
+function drawFVGs(w,vr){
+  const ts=chart.timeScale(), n=candles.length, start=Math.max(1,n-200);
+  octx.setLineDash([]);
+  for(let i=start;i<n-1;i++){
+    const up=candles[i-1].high<candles[i+1].low, dn=candles[i-1].low>candles[i+1].high;
+    if(!up&&!dn) continue;
+    const lo=up?candles[i-1].high:candles[i+1].high, hi=up?candles[i+1].low:candles[i-1].low;
+    let filled=false; for(let j=i+2;j<n;j++){ if(up?candles[j].low<=lo:candles[j].high>=hi){filled=true;break;} }
+    if(filled) continue;
+    const yLo=candleSeries.priceToCoordinate(lo), yHi=candleSeries.priceToCoordinate(hi); if(yLo==null||yHi==null) continue;
+    let x1=ts.timeToCoordinate(candles[i].time); if(x1==null) x1=(candles[i].time<=vr.from)?0:w;
+    octx.fillStyle=up?'rgba(8,153,129,0.13)':'rgba(242,54,69,0.11)';
+    octx.fillRect(x1, Math.min(yLo,yHi), w-x1, Math.abs(yLo-yHi));
+  }
+}
+// LỆNH Long/Short: khung xanh (TP) / đỏ (SL), kéo được
+function drawPosition(w){
+  if(!posOrder) return;
+  const {dir,entry,sl,tp}=posOrder;
+  const yE=candleSeries.priceToCoordinate(entry), yS=candleSeries.priceToCoordinate(sl), yT=candleSeries.priceToCoordinate(tp);
+  if(yE==null||yS==null||yT==null) return;
+  const x1=Math.round(w*0.45), x2=Math.round(w*0.92);
+  octx.setLineDash([]);
+  octx.fillStyle='rgba(8,153,129,0.16)'; octx.fillRect(x1,Math.min(yE,yT),x2-x1,Math.abs(yT-yE));
+  octx.fillStyle='rgba(242,54,69,0.16)'; octx.fillRect(x1,Math.min(yE,yS),x2-x1,Math.abs(yS-yE));
+  octx.lineWidth=1.5;
+  octx.strokeStyle='#58a6ff'; oline(x1,yE,x2,yE);
+  octx.strokeStyle='#089981'; oline(x1,yT,x2,yT);
+  octx.strokeStyle='#f23645'; oline(x1,yS,x2,yS);
+  const hd=(y,c)=>{ octx.fillStyle=c; octx.fillRect(x2-6,y-5,12,10); };
+  hd(yE,'#58a6ff'); hd(yT,'#089981'); hd(yS,'#f23645');
+  const rr=Math.abs(entry-sl)>1e-12?Math.abs(tp-entry)/Math.abs(entry-sl):0;
+  octx.textAlign='left';
+  octx.textBaseline='bottom'; octx.fillStyle='#58a6ff'; octx.fillText(`${dir.toUpperCase()}  Entry ${entry.toPrecision(5)}`, x1+5, yE-3);
+  octx.fillStyle='#3fb950'; octx.fillText(`TP ${tp.toPrecision(5)}   RR ${rr.toFixed(2)}`, x1+5, yT-3);
+  octx.textBaseline='top'; octx.fillStyle='#f85149'; octx.fillText(`SL ${sl.toPrecision(5)}`, x1+5, yS+3);
+}
+function drawNotes(w,vr){
+  if(!userNotes.length) return; const ts=chart.timeScale();
+  octx.textAlign='left'; octx.textBaseline='middle';
+  for(const nt of userNotes){ const y=candleSeries.priceToCoordinate(nt.price); if(y==null) continue;
+    let x=ts.timeToCoordinate(nt.time); if(x==null) x=(nt.time<=vr.from)?0:w;
+    const tw=octx.measureText(nt.text).width; octx.fillStyle='rgba(13,17,23,0.75)'; octx.fillRect(x+3,y-9,tw+16,18);
+    octx.fillStyle='#ffd866'; octx.fillText('📝 '+nt.text, x+6, y+1);
   }
 }
 
@@ -590,14 +653,25 @@ async function loadExt(){
 // ---------------- Edit: anh click đặt/xoá swing ----------------
 function toggleEdit(){
   editMode=!editMode;
-  if(editMode && posMode){ posMode=false; posClicks=[]; posBtnUI(); }   // 2 chế độ loại trừ nhau
+  if(editMode){ pendingDir=null; noteMode=false; }   // các chế độ loại trừ nhau
   const b=document.getElementById('editBtn');
   b.textContent='✏️ Vẽ nhãn: '+(editMode?'BẬT':'TẮT');
   b.classList.toggle('modeOn',editMode);
 }
+let noteMode=false;
+function startPos(dir){ pendingDir=dir; editMode=false; noteMode=false; const b=document.getElementById('editBtn'); b.textContent='✏️ Vẽ nhãn: TẮT'; b.classList.remove('modeOn'); const st=document.getElementById('sendStatus'); st.style.color='#8b949e'; st.textContent='Click lên chart để đặt Entry '+(dir==='long'?'LONG 🟢':'SHORT 🔴')+' (xong kéo SL/TP)'; }
+function startNote(){ noteMode=true; pendingDir=null; editMode=false; document.getElementById('sendStatus').textContent='Click lên chart để đặt ghi chú'; }
+function createPos(entry,dir){
+  let d=0; const n=candles.length, m=Math.min(20,n); for(let i=n-m;i<n;i++) d+=candles[i].high-candles[i].low; d=(d/m)||entry*0.01;
+  const risk=1.5*d;
+  posOrder = dir==='long' ? {dir,entry,sl:entry-risk,tp:entry+2*risk} : {dir,entry,sl:entry+risk,tp:entry-2*risk};
+  drawOverlay(); updatePosStatus();
+}
+function updatePosStatus(){ if(!posOrder) return; const {dir,entry,sl,tp}=posOrder; const rr=Math.abs(entry-sl)>1e-12?Math.abs(tp-entry)/Math.abs(entry-sl):0;
+  const st=document.getElementById('sendStatus'); st.style.color='#58a6ff'; st.textContent=`${dir.toUpperCase()} · E ${entry.toPrecision(5)} · SL ${sl.toPrecision(5)} · TP ${tp.toPrecision(5)} · RR ${rr.toFixed(2)}`; }
 function onChartClick(param){
-  if(posMode){ if(param.point){ const pr=candleSeries.coordinateToPrice(param.point.y); if(pr!=null){ posClicks.push(pr); updatePosHint();
-    if(posClicks.length===3){ drawPos(posClicks[0],posClicks[1],posClicks[2]); posMode=false; posBtnUI(); } } } return; }
+  if(pendingDir){ if(param.point){ const pr=candleSeries.coordinateToPrice(param.point.y); if(pr!=null) createPos(pr,pendingDir); } pendingDir=null; return; }
+  if(noteMode){ if(param.time && param.point){ const pr=candleSeries.coordinateToPrice(param.point.y); let best=null,bd=Infinity; for(const c of candles){ const d=Math.abs(c.time-param.time); if(d<bd){bd=d;best=c;} } const txt=prompt('Ghi chú:'); if(txt&&best){ userNotes.push({time:best.time,price:pr,text:txt}); drawOverlay(); } } noteMode=false; document.getElementById('sendStatus').textContent=''; return; }
   if(!editMode || !param.time || !param.point) return;
   const price=candleSeries.coordinateToPrice(param.point.y); if(price==null) return;
   let best=null,bd=Infinity;
@@ -622,21 +696,7 @@ function renderUser(){
     shape: p.hl==='B'?'circle':(p.hl==='H'?'arrowDown':'arrowUp'),
     text:(p.deg==='ext'?'EXT ':'')+p.kind })));
 }
-function clearUser(){ userPoints=[]; renderUser(); posClicks=[]; posOrder=null; posLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); posLines=[]; document.getElementById('sendStatus').textContent=''; }
-// ---- công cụ vẽ LỆNH (Entry -> SL -> TP) ----
-function posBtnUI(){ const b=document.getElementById('posBtn'); b.classList.toggle('modeOn',posMode); b.textContent=posMode?'📍 click Entry':'📍 Lệnh'; }
-function updatePosHint(){ const b=document.getElementById('posBtn'); if(posMode) b.textContent=['📍 click Entry','📍 click SL','📍 click TP'][posClicks.length]||'📍'; }
-function togglePos(){ posMode=!posMode; posClicks=[]; if(posMode){ editMode=false; document.getElementById('editBtn').textContent='✏️ Vẽ nhãn: TẮT'; document.getElementById('editBtn').classList.remove('modeOn'); } posBtnUI(); }
-function drawPos(entry,sl,tp){
-  posLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); posLines=[];
-  const dir = tp>=entry?'LONG':'SHORT';
-  const rr = Math.abs(entry-sl)>1e-12 ? Math.abs(tp-entry)/Math.abs(entry-sl) : 0;
-  posOrder={entry:+entry,sl:+sl,tp:+tp,dir,rr:+rr.toFixed(2)};
-  posLines.push(candleSeries.createPriceLine({price:entry,color:'#58a6ff',lineWidth:2,axisLabelVisible:true,title:'Entry '+entry.toPrecision(5)}));
-  posLines.push(candleSeries.createPriceLine({price:sl,color:'#f23645',lineWidth:2,lineStyle:2,axisLabelVisible:true,title:'SL '+sl.toPrecision(5)}));
-  posLines.push(candleSeries.createPriceLine({price:tp,color:'#089981',lineWidth:2,lineStyle:2,axisLabelVisible:true,title:`TP · ${dir} · RR ${rr.toFixed(2)}`}));
-  const st=document.getElementById('sendStatus'); st.style.color='#58a6ff'; st.textContent=`${dir}  Entry ${entry.toPrecision(5)}  SL ${sl.toPrecision(5)}  TP ${tp.toPrecision(5)}  RR ${rr.toFixed(2)}`;
-}
+function clearUser(){ userPoints=[]; renderUser(); posOrder=null; pendingDir=null; dragHandle=null; userNotes=[]; document.getElementById('sendStatus').textContent=''; drawOverlay(); }
 
 // ---------------- Export ----------------
 const RELAY='https://ntfy.sh/rudy-zigzag-lab-7h3k9x2';  // kênh trung gian Claude đọc
@@ -653,7 +713,8 @@ function buildExport(){
     algoSwings: algoSwings.map(s=>({t:s.time,p:+s.price.toFixed(5),type:s.type})),
     extSwings: extSwings.map(s=>({t:s.time,p:+s.price.toFixed(5),type:s.type})),
     userSwings: userPoints.map(p=>({t:p.time,p:+p.price.toFixed(5),kind:p.kind,hl:p.hl,deg:p.deg||'int'})),
-    positionOrder: posOrder,
+    positionOrder: posOrder ? {...posOrder, rr:+(Math.abs(posOrder.entry-posOrder.sl)>1e-12?Math.abs(posOrder.tp-posOrder.entry)/Math.abs(posOrder.entry-posOrder.sl):0).toFixed(2)} : null,
+    notes: userNotes.map(n=>({t:n.time,p:+n.price.toFixed(5),text:n.text})),
   };
 }
 function doExport(){
