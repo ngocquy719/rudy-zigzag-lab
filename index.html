@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-21·#12 (bắt cả BOS/CHoCH ở leg đang chạy)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-22·#13 (nhãn tại breakout, tắt SL/TP, swap khung tự nạp)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -48,7 +48,7 @@
   </div>
   <div class="ctl" id="binCtl">
     <input id="sym" value="BTCUSDT" size="9" title="Symbol Binance">
-    <select id="tf">
+    <select id="tf" onchange="loadData()" title="Đổi khung -> tự nạp lại đúng khung đó">
       <option>1m</option><option>5m</option><option>15m</option><option>30m</option>
       <option selected>1h</option><option>4h</option><option>1d</option><option>1w</option>
     </select>
@@ -73,11 +73,7 @@
     <span id="minRetrV">0.40</span>
   </div>
   <div class="ctl" id="stratCtl">
-    <label title="Hiện nhãn BOS/CHoCH + fibo + backtest"><input id="showSmc" type="checkbox" checked onchange="recalc()"> BOS/CHoCH+Fibo</label>
-    <label>Kèo:</label>
-    <select id="side" onchange="recalc()"><option value="both">Long+Short</option><option value="long">Long (discount)</option><option value="short">Short (premium)</option></select>
-    <label>Vào fib:</label><input id="efib" type="number" value="0.5" step="0.05" min="0.3" max="0.9" size="3" style="width:52px" oninput="recalc()">
-    <label>TP:</label><input id="tpR" type="number" value="2" step="0.5" min="0.5" max="5" size="3" style="width:48px" oninput="recalc()"><span style="color:var(--mut)">R</span>
+    <label title="Hiện nhãn BOS/CHoCH + fibo"><input id="showSmc" type="checkbox" checked onchange="recalc()"> BOS/CHoCH + Fibo</label>
   </div>
   <div class="ctl">
     <button id="editBtn" class="mode" onclick="toggleEdit()">✏️ Chế độ vẽ của ANH: TẮT</button>
@@ -311,7 +307,7 @@ function labelStructure(sw){
 // pool các line-series kẻ nét ngang BOS/CHoCH (tái dùng, không add/remove mỗi lần recalc cho đỡ giật)
 let structPool=[];
 function ensureStruct(n){ while(structPool.length<n) structPool.push(chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false})); }
-function clearStruct(){ structPool.forEach(s=>s.setData([])); }
+function clearStruct(){ structPool.forEach(s=>{ s.setData([]); s.setMarkers([]); }); }
 // ---------------- BACKTEST: vào vùng discount/premium (fib) sau khi cấu trúc phá ----------------
 // Không look-ahead: chỉ vào bằng lệnh CHỜ dưới/ trên giá sau khi đỉnh/đáy đã hình thành; thoát quét tiến,
 // CÙNG NẾN chạm cả SL+TP -> tính SL trước (bảo thủ). SL đặt tại cấu trúc (đáy/đỉnh leg), TP = bội số R.
@@ -361,29 +357,16 @@ function analyze(){
   const stats=document.getElementById('stats'); stats.textContent='';
   if(document.getElementById('algo').value!=='fractal'){ fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(e){}}); fibLines=[]; clearStruct(); return; }
   if(!document.getElementById('showSmc').checked){ clearStruct(); drawFib(); return; }
-  const sw=algoSwings, ev=labelStructure(sw), markers=[];
+  const ev=labelStructure(algoSwings);
   ensureStruct(ev.length);
-  ev.forEach((e,i)=>{ const col=e.type==='CHoCH'?'#e36209':'#8b949e';
-    structPool[i].applyOptions({color:col});
-    structPool[i].setData([{time:candles[e.pivotIdx].time,value:e.level},{time:candles[e.breakIdx].time,value:e.level}]);  // nét ngang: mức cũ -> nến break
-    markers.push({time:candles[e.breakIdx].time,position:e.dir>0?'aboveBar':'belowBar',color:col,shape:e.dir>0?'arrowUp':'arrowDown',text:e.type});
+  ev.forEach((e,i)=>{ const col=e.type==='CHoCH'?'#e36209':'#8b949e'; const ls=structPool[i];
+    ls.applyOptions({color:col});
+    ls.setData([{time:candles[e.pivotIdx].time,value:e.level},{time:candles[e.breakIdx].time,value:e.level}]);   // nét ngang: mức cũ -> nến break
+    // nhãn nằm NGAY TRÊN NÉT tại điểm breakout (gắn vào line-series), KHÔNG trôi lên đỉnh nến
+    ls.setMarkers([{time:candles[e.breakIdx].time,position:e.dir>0?'aboveBar':'belowBar',color:col,shape:e.dir>0?'arrowUp':'arrowDown',text:e.type}]);
   });
-  for(let i=ev.length;i<structPool.length;i++) structPool[i].setData([]);
-  const side=document.getElementById('side').value;
-  const efib=parseFloat(document.getElementById('efib').value)||0.5;
-  const tpR=parseFloat(document.getElementById('tpR').value)||2;
-  let trades=[];
-  if(side==='long'||side==='both') trades=trades.concat(backtest(candles,sw,{dir:1,entryFib:efib,tpR}));
-  if(side==='short'||side==='both') trades=trades.concat(backtest(candles,sw,{dir:-1,entryFib:efib,tpR}));
-  for(const t of trades){ markers.push({time:candles[t.entryIdx].time,position:t.dir>0?'belowBar':'aboveBar',color:'#2157f3',shape:t.dir>0?'arrowUp':'arrowDown',text:'vào'});
-    markers.push({time:candles[t.exitIdx].time,position:t.win?'aboveBar':'belowBar',color:t.win?'#089981':'#f23645',shape:'circle',text:t.win?'TP':'SL'}); }
-  markers.sort((a,b)=>a.time-b.time);
-  candleSeries.setMarkers(markers);
+  for(let i=ev.length;i<structPool.length;i++){ structPool[i].setData([]); structPool[i].setMarkers([]); }
   drawFib();
-  const n=trades.length, wins=trades.filter(t=>t.win).length, sumR=trades.reduce((a,t)=>a+t.R,0);
-  stats.textContent = n
-    ? `📊 ${candles.length} nến · ${side.toUpperCase()} vào fib ${efib} TP ${tpR}R — N=${n} · Win ${(100*wins/n).toFixed(0)}% · tổng ${sumR>=0?'+':''}${sumR.toFixed(1)}R · TB ${(sumR/n).toFixed(2)}R/kèo  ⚠ in-sample · 1 cửa sổ · chưa tính phí/slippage`
-    : '📊 Chưa đủ kèo hợp lệ trong cửa sổ này (thử tăng số nến / đổi detail).';
 }
 
 function switchAlgo(){
