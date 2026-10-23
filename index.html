@@ -44,7 +44,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#36 (xem kèo SẠCH: zigzag + mũi tên CHoCH VÀO)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#37 (cấu-trúc luôn hiện - sửa mất BOS/CHoCH)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -800,8 +800,7 @@ async function importSignal(sig){
   document.getElementById('src').value='binance'; document.getElementById('binCtl').style.display='flex';
   document.getElementById('sym').value=sig.symbol; document.getElementById('tf').value=sig.tf||'15m';
   sigAnnotations(sig);
-  document.getElementById('showFvg').checked=true;
-  document.getElementById('showSmc').checked=false;   // XEM SẠCH: tắt đám nhãn BOS/CHoCH, chỉ đường zigzag + mũi tên VÀO
+  document.getElementById('showSmc').checked=true;   // cấu-trúc BOS/CHoCH LUÔN hiện
   await switchTF(sig.tf||'15m');
   const st=document.getElementById('sendStatus'); st.style.color='#089981'; st.textContent=`✓ ${sig.symbol} ${sig.dir>0?'LONG':'SHORT'} RR ${sig.rr||''} — đổi KHUNG (ô trên) xem H4/H1/M15/M5, lệnh ở yên`;
 }
