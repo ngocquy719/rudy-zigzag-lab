@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#32 (xem kèo khung nhỏ: cửa sổ gọn, CHoCH hiện)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#33 (danh sách kèo review)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -99,7 +99,8 @@
     <label title="Hiện FVG (khoảng trống chưa lấp)"><input id="showFvg" type="checkbox" onchange="drawOverlay();saveUI()"> FVG</label>
     <button class="warn" onclick="clearUser()">Xoá</button>
     <button class="primary" onclick="sendToClaude()">📨 Gửi cho em</button>
-    <button class="primary" style="background:#6e40c9;border-color:#6e40c9" onclick="recvKeo()">📥 Nhận kèo EM</button>
+    <button class="primary" style="background:#6e40c9;border-color:#6e40c9" onclick="recvKeo()">📥 Nhận list kèo</button>
+    <select id="keoList" style="display:none" onchange="loadFromList()" title="Chọn mã để soi"></select>
     <button onclick="doExport()">📤 Export (copy tay)</button>
     <span id="sendStatus" style="font-weight:600"></span>
   </div>
@@ -738,14 +739,21 @@ function clearUser(){ userPoints=[]; posOrder=null; pendingDir=null; dragHandle=
 // ---------------- Nhận kèo EM gửi (Claude -> web) ----------------
 const KEO='https://ntfy.sh/rudy-zigzag-lab-keo-7h3k9x2';
 const barSec={'1m':60,'5m':300,'15m':900,'30m':1800,'1h':3600,'4h':14400,'1d':86400,'1w':604800};
+let keoSignals=[];
 async function recvKeo(){
-  const st=document.getElementById('sendStatus'); st.style.color='#a371f7'; st.textContent='⏳ nhận kèo...';
-  try{ const r=await fetch(KEO+'/json?poll=1&since=24h'); const txt=await r.text();
+  const st=document.getElementById('sendStatus'); st.style.color='#a371f7'; st.textContent='⏳ nhận list kèo...';
+  try{ const r=await fetch(KEO+'/json?poll=1&since=48h'); const txt=await r.text();
     const lines=txt.trim().split(/\r?\n/).filter(Boolean); if(!lines.length){ st.textContent='chưa có kèo nào'; return; }
-    const sig=JSON.parse(JSON.parse(lines[lines.length-1]).message);
-    await importSignal(sig);
+    const obj=JSON.parse(JSON.parse(lines[lines.length-1]).message);
+    if(obj.list && Array.isArray(obj.list)){ keoSignals=obj.list; } else { keoSignals=[obj]; }
+    fillKeoList(); if(keoSignals.length) await importSignal(keoSignals[0]);
   }catch(e){ st.style.color='#f23645'; st.textContent='lỗi nhận kèo: '+e.message; }
 }
+function fillKeoList(){ const sel=document.getElementById('keoList'); sel.innerHTML='';
+  sel.style.display = keoSignals.length>1 ? 'inline-block' : 'none';
+  keoSignals.forEach((s,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=`${i+1}. ${s.symbol} ${s.dir>0?'LONG':'SHORT'} RR${s.rr||''}`; sel.appendChild(o); });
+  sel.value=0; }
+function loadFromList(){ const i=+document.getElementById('keoList').value; if(keoSignals[i]) importSignal(keoSignals[i]); }
 let activeSig=null, anchorTime=null;
 const VIEW_SPAN = 500*3600;   // ~500 nến H1 ≈ 20.8 ngày — GIỮ CỐ ĐỊNH cho mọi khung
 // ĐỔI KHUNG (1 ô duy nhất): giữ nguyên lệnh+nhãn (neo theo time/price), chỉ zigzag/internal đổi.
