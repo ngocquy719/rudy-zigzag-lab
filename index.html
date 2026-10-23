@@ -20,7 +20,14 @@
   button { cursor:pointer; }
   button.primary { background:var(--accent); border-color:var(--accent); }
   button.warn { background:#9e1b1b; border-color:#9e1b1b; }
-  #chart { width:100%; flex:1 1 auto; min-height:220px; touch-action:none; }
+  #main { display:flex; flex:1 1 auto; min-height:0; }
+  #chart { flex:1 1 auto; min-height:220px; touch-action:none; }
+  #watch { flex:0 0 150px; border-left:1px solid var(--line); overflow:auto; font-size:12px; }
+  #watch .whead { padding:6px 8px; color:var(--mut); font-weight:600; border-bottom:1px solid var(--line); }
+  #watch .wi { padding:7px 8px; cursor:pointer; border-bottom:1px solid #1c222b; display:flex; justify-content:space-between; gap:4px; }
+  #watch .wi:hover { background:#161b22; }
+  #watch .wi.sel { background:#1f6feb44; }
+  @media (max-width:720px){ #watch { flex-basis:120px; } }
   .hint { font-size:12px; color:var(--mut); padding:6px 12px; border-top:1px solid var(--line); flex:0 0 auto; max-height:34vh; overflow:auto; }
   /* Mobile: nút to hơn cho dễ chạm, chữ không tràn */
   @media (max-width:720px){
@@ -37,7 +44,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#33 (danh sách kèo review)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#34 (watchlist bên phải + sửa chart bị bóp)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -100,7 +107,6 @@
     <button class="warn" onclick="clearUser()">Xoá</button>
     <button class="primary" onclick="sendToClaude()">📨 Gửi cho em</button>
     <button class="primary" style="background:#6e40c9;border-color:#6e40c9" onclick="recvKeo()">📥 Nhận list kèo</button>
-    <select id="keoList" style="display:none" onchange="loadFromList()" title="Chọn mã để soi"></select>
     <button onclick="doExport()">📤 Export (copy tay)</button>
     <span id="sendStatus" style="font-weight:600"></span>
   </div>
@@ -113,7 +119,10 @@
   <button onclick="loadCSVText()">Nạp CSV dán</button>
 </div>
 
-<div id="chart"></div>
+<div id="main">
+  <div id="chart"></div>
+  <div id="watch"><div class="whead">KÈO — bấm "📥 Nhận list kèo"</div></div>
+</div>
 
 <div class="hint">
   <div id="stats" style="margin-bottom:6px; font-weight:600; color:#58a6ff"></div>
@@ -749,11 +758,13 @@ async function recvKeo(){
     fillKeoList(); if(keoSignals.length) await importSignal(keoSignals[0]);
   }catch(e){ st.style.color='#f23645'; st.textContent='lỗi nhận kèo: '+e.message; }
 }
-function fillKeoList(){ const sel=document.getElementById('keoList'); sel.innerHTML='';
-  sel.style.display = keoSignals.length>1 ? 'inline-block' : 'none';
-  keoSignals.forEach((s,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=`${i+1}. ${s.symbol} ${s.dir>0?'LONG':'SHORT'} RR${s.rr||''}`; sel.appendChild(o); });
-  sel.value=0; }
-function loadFromList(){ const i=+document.getElementById('keoList').value; if(keoSignals[i]) importSignal(keoSignals[i]); }
+function fillKeoList(){ const w=document.getElementById('watch');
+  w.innerHTML=`<div class="whead">KÈO (${keoSignals.length}) · bấm để soi</div>`;
+  keoSignals.forEach((s,i)=>{ const d=document.createElement('div'); d.className='wi';
+    d.innerHTML=`<b>${s.symbol.replace('USDT','')}</b><span style="color:${s.dir>0?'#3fb950':'#f85149'}">${s.dir>0?'L':'S'}·RR${s.rr||''}</span>`;
+    d.onclick=()=>{ document.querySelectorAll('#watch .wi').forEach(x=>x.classList.remove('sel')); d.classList.add('sel'); importSignal(keoSignals[i]); };
+    w.appendChild(d); });
+  const first=w.querySelector('.wi'); if(first) first.classList.add('sel'); }
 let activeSig=null, anchorTime=null;
 const VIEW_SPAN = 500*3600;   // ~500 nến H1 ≈ 20.8 ngày — GIỮ CỐ ĐỊNH cho mọi khung
 // ĐỔI KHUNG (1 ô duy nhất): giữ nguyên lệnh+nhãn (neo theo time/price), chỉ zigzag/internal đổi.
