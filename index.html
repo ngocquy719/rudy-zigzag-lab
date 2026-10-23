@@ -44,7 +44,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#35 (CHoCH vẽ sống theo Độ-mịn)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#36 (xem kèo SẠCH: zigzag + mũi tên CHoCH VÀO)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -793,13 +793,15 @@ function sigAnnotations(sig){   // CHỈ giữ lệnh + vùng + mốc cố đị
   posOrder={dir:sig.dir>0?'long':'short', entry:sig.entry, sl:sig.sl, tp:sig.tp, t0:sig.t0};
   if(Array.isArray(sig.zones)) zones=sig.zones.slice();
   if(sig.extHt&&sig.extHp) userNotes.push({time:sig.extHt,price:sig.extHp,text:sig.dir<0?'đỉnh external (gốc)':'đáy external (gốc)'});
-  userNotes.push({time:sig.t0,price:sig.entry,text:'VÀO'});
+  userNotes.push({time:sig.t0,price:sig.entry,text:(sig.dir<0?'CHoCH↓ VÀO':'CHoCH↑ VÀO')});
 }
 async function importSignal(sig){
   activeSig=sig; anchorTime=sig.t0;
   document.getElementById('src').value='binance'; document.getElementById('binCtl').style.display='flex';
   document.getElementById('sym').value=sig.symbol; document.getElementById('tf').value=sig.tf||'15m';
-  sigAnnotations(sig); document.getElementById('showFvg').checked=true;
+  sigAnnotations(sig);
+  document.getElementById('showFvg').checked=true;
+  document.getElementById('showSmc').checked=false;   // XEM SẠCH: tắt đám nhãn BOS/CHoCH, chỉ đường zigzag + mũi tên VÀO
   await switchTF(sig.tf||'15m');
   const st=document.getElementById('sendStatus'); st.style.color='#089981'; st.textContent=`✓ ${sig.symbol} ${sig.dir>0?'LONG':'SHORT'} RR ${sig.rr||''} — đổi KHUNG (ô trên) xem H4/H1/M15/M5, lệnh ở yên`;
 }
