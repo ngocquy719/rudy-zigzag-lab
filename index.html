@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#30 (external detail 34)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#31 (chuột-phải gỡ sóng)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -136,6 +136,7 @@ let overlay, octx;          // canvas phủ để vẽ nhãn BOS/CHoCH căn-gi�
 let extCandles=[], extSwings=[], extSeries;   // cấu trúc EXTERNAL = từ khung LỚN (H1/H4), KHÁC internal của khung đang xem
 let posOrder=null, pendingDir=null, dragHandle=null, userNotes=[];   // lệnh Long/Short kéo được + ghi chú
 let zones=[], zoneMode=false, zonePts=[];   // vẽ zone (FVG/vùng) tay
+let removedSwings=[];   // thời điểm các swing bị gỡ tay (chuột phải) — recalc lọc bỏ
 
 function initChart(){
   const el = document.getElementById('chart');
@@ -176,6 +177,14 @@ function initChart(){
   el.addEventListener('touchstart',e=>{ if(e.touches[0]) pDown(e.touches[0].clientY,e); },{capture:true,passive:false});
   window.addEventListener('touchmove',e=>{ if(dragHandle&&e.touches[0]){ pMove(e.touches[0].clientY); if(e.cancelable)e.preventDefault(); } },{passive:false});
   window.addEventListener('touchend',pUp);
+  // CHUỘT PHẢI = gỡ con sóng gần nhất (zigzag tự nối tới điểm kế)
+  el.addEventListener('contextmenu', e=>{ e.preventDefault(); if(!algoSwings.length) return;
+    const r=el.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+    let best=null,bd=Infinity;
+    for(const s of algoSwings){ const sx=chart.timeScale().timeToCoordinate(s.time), sy=candleSeries.priceToCoordinate(s.price); if(sx==null||sy==null)continue; const d=Math.hypot(sx-mx,sy-my); if(d<bd){bd=d;best=s;} }
+    if(best && bd<45){ removedSwings.push(best.time); recalc(); saveDrawings();
+      const st=document.getElementById('sendStatus'); st.style.color='#8b949e'; st.textContent='đã gỡ 1 sóng (chuột phải lại để gỡ tiếp · Xoá để hoàn tác)'; }
+  });
   // autoSize:true đã tự co giãn theo khung; gọi fit khi xoay ngang/dọc điện thoại
   window.addEventListener('orientationchange', ()=> setTimeout(()=>{chart.timeScale().fitContent();drawOverlay();},300));
 }
@@ -642,6 +651,7 @@ function recalc(){
     document.getElementById('minRetrV').textContent=mr.toFixed(2);
     algoSwings=computeZigzag(candles,mr);
   }
+  if(removedSwings.length) algoSwings=algoSwings.filter(s=>!removedSwings.includes(s.time));  // gỡ con sóng anh bỏ tay (chuột phải)
   // đảm bảo thời gian tăng dần (lightweight-charts yêu cầu). KHI 1 nến vừa là đỉnh vừa là đáy
   // (nến biên-độ-rộng) -> 2 vertex trùng bar: NHÍCH vertex sau +epsilon để GIỮ CẢ HAI,
   // tuyệt đối không ghi đè (ghi đè = nuốt mất 1 đỉnh/đáy thật, gây "sai đỉnh" trên chart).
@@ -710,8 +720,8 @@ function onChartClick(param){
 // ---- lưu/khôi phục theo mã (F5 không mất việc) ----
 function drawKey(){ return 'zz:'+document.getElementById('sym').value.toUpperCase(); }   // nét theo MÃ (đổi khung không mất)
 function saveUI(){ try{ localStorage.setItem('zz:ui', JSON.stringify({sym:document.getElementById('sym').value,tf:document.getElementById('tf').value,detail:document.getElementById('detail').value,fvg:!!(document.getElementById('showFvg')&&document.getElementById('showFvg').checked)})); }catch(e){} }
-function saveDrawings(){ try{ localStorage.setItem(drawKey(), JSON.stringify({userPoints,posOrder,userNotes,zones})); }catch(e){} saveUI(); }
-function restoreDrawings(){ try{ const s=localStorage.getItem(drawKey()); const o=s?JSON.parse(s):{}; userPoints=o.userPoints||[]; posOrder=o.posOrder||null; userNotes=o.userNotes||[]; zones=o.zones||[]; }catch(e){ userPoints=[];posOrder=null;userNotes=[];zones=[]; } renderUser(); drawOverlay(); }
+function saveDrawings(){ try{ localStorage.setItem(drawKey(), JSON.stringify({userPoints,posOrder,userNotes,zones,removedSwings})); }catch(e){} saveUI(); }
+function restoreDrawings(){ try{ const s=localStorage.getItem(drawKey()); const o=s?JSON.parse(s):{}; userPoints=o.userPoints||[]; posOrder=o.posOrder||null; userNotes=o.userNotes||[]; zones=o.zones||[]; removedSwings=o.removedSwings||[]; }catch(e){ userPoints=[];posOrder=null;userNotes=[];zones=[];removedSwings=[]; } renderUser(); drawOverlay(); }
 function renderUser(){
   userPoints.sort((a,b)=>a.time-b.time);
   // nét nối chỉ qua các điểm SWING (H/L), không qua nhãn BOS/CHoCH
@@ -723,7 +733,7 @@ function renderUser(){
     shape: p.hl==='B'?'circle':(p.hl==='H'?'arrowDown':'arrowUp'),
     text:(p.deg==='ext'?'EXT ':'')+p.kind })));
 }
-function clearUser(){ userPoints=[]; posOrder=null; pendingDir=null; dragHandle=null; userNotes=[]; zones=[]; zonePts=[]; zoneMode=false; renderUser(); document.getElementById('sendStatus').textContent=''; drawOverlay(); saveDrawings(); }
+function clearUser(){ userPoints=[]; posOrder=null; pendingDir=null; dragHandle=null; userNotes=[]; zones=[]; zonePts=[]; zoneMode=false; removedSwings=[]; renderUser(); recalc(); document.getElementById('sendStatus').textContent=''; drawOverlay(); saveDrawings(); }
 
 // ---------------- Nhận kèo EM gửi (Claude -> web) ----------------
 const KEO='https://ntfy.sh/rudy-zigzag-lab-keo-7h3k9x2';
