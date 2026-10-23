@@ -44,7 +44,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#34 (watchlist bên phải + sửa chart bị bóp)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#35 (CHoCH vẽ sống theo Độ-mịn)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -788,15 +788,12 @@ async function switchTF(tf){
     drawOverlay(); st.textContent=oc; saveUI();
   }catch(e){ st.style.color='#f23645'; st.textContent='lỗi nạp '+tf; }
 }
-function sigAnnotations(sig){   // chú thích kèo (time+price -> hiện ĐÚNG chỗ ở MỌI khung)
+function sigAnnotations(sig){   // CHỈ giữ lệnh + vùng + mốc cố định; CHoCH để vẽ SỐNG theo thanh Độ-mịn
   userPoints=[]; userNotes=[]; zones=[];
   posOrder={dir:sig.dir>0?'long':'short', entry:sig.entry, sl:sig.sl, tp:sig.tp, t0:sig.t0};
   if(Array.isArray(sig.zones)) zones=sig.zones.slice();
   if(sig.extHt&&sig.extHp) userNotes.push({time:sig.extHt,price:sig.extHp,text:sig.dir<0?'đỉnh external (gốc)':'đáy external (gốc)'});
-  if(sig.m15t&&sig.m15p) userNotes.push({time:sig.m15t,price:sig.m15p,text:'CHoCH '+(sig.midTf||'M15')});
-  userNotes.push({time:sig.t0,price:sig.entry,text:(sig.nested?'CHoCH M5 → VÀO':'CHoCH → VÀO')});
-  userNotes.push({time:sig.t0,price:sig.sl,text:'SL (internal)'});
-  userNotes.push({time:sig.t0,price:sig.tp,text:'TP (external, xa)'});
+  userNotes.push({time:sig.t0,price:sig.entry,text:'VÀO'});
 }
 async function importSignal(sig){
   activeSig=sig; anchorTime=sig.t0;
