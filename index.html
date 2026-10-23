@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#31 (chuột-phải gỡ sóng)</span></h1>
+  <h1>🎯 Rudy Zigzag Lab <span style="font-size:10px;color:#58a6ff;font-weight:400">build 2026-10-23·#32 (xem kèo khung nhỏ: cửa sổ gọn, CHoCH hiện)</span></h1>
   <div class="ctl">
     <label>Nguồn:</label>
     <select id="src">
@@ -754,7 +754,11 @@ async function switchTF(tf){
   if(document.getElementById('src').value!=='binance'){ return loadData(); }
   const sym=document.getElementById('sym').value.toUpperCase(), bar=barSec[tf]||3600;
   const center = anchorTime || (candles.length?candles[candles.length-1].time:Math.floor(Date.now()/1000));
-  const startMs=(center-VIEW_SPAN)*1000, endMs=(center+Math.min(VIEW_SPAN*0.25,150*bar))*1000;
+  const bigTF=['1h','4h','1d','1w'].includes(tf);
+  // Xem kèo ở KHUNG NHỎ -> cửa sổ GỌN quanh entry (cấu trúc fine, CHoCH hiện rõ). Khung lớn -> phủ rộng.
+  let startMs, endMs;
+  if(activeSig && !bigTF){ startMs=(center-250*bar)*1000; endMs=(center+100*bar)*1000; }
+  else { startMs=(center-VIEW_SPAN)*1000; endMs=(center+Math.min(VIEW_SPAN*0.25,150*bar))*1000; }
   const st=document.getElementById('sendStatus'), oc=st.textContent; st.style.color='#8b949e'; st.textContent='⏳ nạp '+tf+'...';
   try{ const cs=await fetchPaged(sym,tf,startMs,endMs); if(!cs.length){ st.textContent='lỗi nạp '+tf; return; }
     candles=cs; candleSeries.setData(candles);
